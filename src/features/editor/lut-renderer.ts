@@ -1,7 +1,12 @@
-// WebGL2: cada quadro do <video> vira textura 2D e o shader aplica a LUT 3D. Sem readPixels, sem rede.
+// WebGL2: cada quadro (do <video> na prévia, decodificado na exportação) vira textura 2D e o shader aplica a LUT 3D.
+// Sem readPixels, sem rede. A exportação usa este mesmo renderizador e este mesmo shader.
 import { NORMALIZE_APPLE_LOG_GLSL } from "./apple-log";
 import type { CubeLut } from "./cube-lut";
 import { clamp01, lutTexture } from "./lut-math";
+
+export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
+/** Quadro decodificado da exportação (ou o canvas que o Mediabunny entrega depois de girar). */
+export type FrameSource = VideoFrame | RenderCanvas;
 
 export type LutRenderer = {
   setLut(lut: CubeLut | null): void;
@@ -10,6 +15,7 @@ export type LutRenderer = {
   /** normalizedBase: o "antes" é o Apple Log convertido; lookInput: a LUT também recebe a imagem convertida. */
   setNormalization(normalization: { normalizedBase: boolean; lookInput: boolean }): void;
   draw(): void; // quadro atual do vídeo; nada se ainda não há quadro
+  drawFrame(frame: FrameSource): void; // exportação: o canvas passa a ter o tamanho do quadro
   dispose(): void;
 };
 
@@ -65,12 +71,12 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
 }
 
 // Num contexto perdido getExtension devolve null; guardar a extensão permite reaproveitar o canvas (Strict Mode).
-const loseContext = new WeakMap<HTMLCanvasElement, WEBGL_lose_context | null>();
+const loseContext = new WeakMap<RenderCanvas, WEBGL_lose_context | null>();
 
-/** Devolve null quando o navegador não oferece WebGL2 ou o shader não compila. */
+/** Devolve null quando o navegador não oferece WebGL2 ou o shader não compila. Sem `video`, só drawFrame desenha. */
 export function createLutRenderer(
-  canvas: HTMLCanvasElement,
-  video: HTMLVideoElement,
+  canvas: RenderCanvas,
+  video: HTMLVideoElement | null,
   onUnsupported: () => void, // falha ao recriar os recursos depois de perder o contexto
 ): LutRenderer | null {
   const context = canvas.getContext("webgl2", { alpha: false, antialias: false });
@@ -131,10 +137,20 @@ export function createLutRenderer(
 
   function draw() {
     // HAVE_CURRENT_DATA (2): já existe um quadro para enviar.
-    if (lost || !program || video.readyState < 2 || video.videoWidth === 0) return;
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+    if (!video || video.readyState < 2 || video.videoWidth === 0) return;
+    render(video, video.videoWidth, video.videoHeight);
+  }
+
+  function drawFrame(frame: FrameSource) {
+    const [width, height] = "displayWidth" in frame ? [frame.displayWidth, frame.displayHeight] : [frame.width, frame.height];
+    render(frame, width, height);
+  }
+
+  function render(source: TexImageSource | VideoFrame, width: number, height: number) {
+    if (lost || !program) return;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
     }
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(program);
@@ -143,7 +159,7 @@ export function createLutRenderer(
     // Sem conversão do navegador: ela mudaria as primárias antes da matriz do shader.
     gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
     // RGBA16F: a curva Log roda sobre ponto flutuante, não sobre 8 bits.
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, video);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, source);
     gl.uniform1i(uniforms.uFrame, 0);
     gl.uniform1i(uniforms.uLut, 1);
     gl.uniform3fv(uniforms.uDomainMin, table.domainMin);
@@ -191,6 +207,7 @@ export function createLutRenderer(
     },
     setNormalization: (next) => void (normalization = next),
     draw,
+    drawFrame,
     dispose() {
       canvas.removeEventListener("webglcontextlost", onContextLost);
       canvas.removeEventListener("webglcontextrestored", onContextRestored);

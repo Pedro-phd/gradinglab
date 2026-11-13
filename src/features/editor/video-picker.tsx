@@ -11,6 +11,7 @@ import {
 } from "./local-video";
 import { LookPanel } from "./look-panel";
 import { LutPreview } from "./lut-preview";
+import { ExportSection } from "./export-panel";
 import { effectiveIntensity, initialLutState, lutReducer } from "./lut-state";
 
 type Metadata = { duration: number; width: number; height: number };
@@ -18,7 +19,7 @@ type Metadata = { duration: number; width: number; height: number };
 type State =
   | { kind: "empty" }
   | { kind: "error"; message: string; attempt: number }
-  | { kind: "video"; name: string; url: string; autoPlay: boolean; metadata: Metadata | null };
+  | { kind: "video"; name: string; file: File; url: string; autoPlay: boolean; metadata: Metadata | null };
 
 const panel = "rounded-[28px] border border-white/10 bg-white/[.07] backdrop-blur-xl";
 // Por id: o foco do input da LUT não deve acender os labels do vídeo.
@@ -37,6 +38,8 @@ export function VideoPicker() {
   const markUnsupported = useCallback(() => setUnsupported(true), []);
   const url = state.kind === "video" ? state.url : null;
   const plan = planPipeline(choice.profile, lutExpectsLog);
+  // O que a prévia mostra é o que a exportação leva.
+  const shownIntensity = plan.intensityAvailable ? effectiveIntensity(lutState, intensity) : 0;
   const markFrameColor = useCallback((info: FrameColorInfo | null) => {
     setChoice((current) => (current.source === "manual" ? current : suggestProfile(info)));
     setHdr(isHdrFrame(info));
@@ -74,6 +77,7 @@ export function VideoPicker() {
     setState({
       kind: "video",
       name: file.name,
+      file,
       url: URL.createObjectURL(file),
       autoPlay,
       metadata: null,
@@ -134,7 +138,7 @@ export function VideoPicker() {
               src={state.url}
               autoPlay={state.autoPlay}
               lut={lutState.lut}
-              intensity={plan.intensityAvailable ? effectiveIntensity(lutState, intensity) : 0}
+              intensity={shownIntensity}
               lutName={lutState.lut ? lutState.name : null}
               intensityPercent={intensity}
               awaitingProfile={!plan.applyLook}
@@ -173,6 +177,16 @@ export function VideoPicker() {
             hdr={hdr}
             onProfileChange={(profile: SourceProfile) => setChoice(chooseProfile(profile))}
             onLutExpectsLogChange={setLutExpectsLog}
+            exportSection={
+              <ExportSection
+                key={state.url}
+                file={state.file}
+                lutName={lutState.lut ? lutState.name : null}
+                intensityPercent={intensity}
+                color={{ profile: choice.profile, lutExpectsLog, lut: lutState.lut, intensity: shownIntensity }}
+                blocked={unsupported ? "Indisponível sem WebGL2." : !lutState.lut ? "Importe uma LUT para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null}
+              />
+            }
           />
         </div>
       ) : (

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, ReactNode } from "react";
 import type { PipelinePlan, ProfileChoice, SourceProfile } from "./color-pipeline";
 import type { LutState } from "./lut-state";
 import { SourceProfileSection } from "./source-profile";
@@ -21,9 +21,10 @@ type Props = {
   hdr: boolean;
   onProfileChange: (profile: SourceProfile) => void;
   onLutExpectsLogChange: (expectsLog: boolean) => void;
+  exportSection: ReactNode;
 };
 
-export function LookPanel({ state, unsupported, intensity, onIntensityChange, onLutFile, choice, plan, lutExpectsLog, hdr, onProfileChange, onLutExpectsLogChange }: Props) {
+export function LookPanel({ state, unsupported, intensity, onIntensityChange, onLutFile, choice, plan, lutExpectsLog, hdr, onProfileChange, onLutExpectsLogChange, exportSection }: Props) {
   const enabled = state.lut !== null && !unsupported && plan.intensityAvailable;
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -92,6 +93,8 @@ export function LookPanel({ state, unsupported, intensity, onIntensityChange, on
         </div>
         {!enabled && <p className="text-xs text-muted">{unsupported ? "Indisponível sem WebGL2." : !state.lut ? "Importe uma LUT para ajustar a intensidade." : "Confirme a origem do vídeo para ajustar a intensidade."}</p>}
       </section>
+
+      {exportSection}
     </aside>
   );
 }
