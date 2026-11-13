@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CubeLut } from "./cube-lut";
-import { checkSupport, exportFileName, isTenBit, needsMemoryWarning, planExport, type ExportColor, type ExportEnv, type ExportSource } from "./export-plan";
+import { checkSupport, countPlayedPackets, exportFileName, isTenBit, needsMemoryWarning, planExport, rotatedSize, type ExportColor, type ExportEnv, type ExportSource } from "./export-plan";
 
 const source: ExportSource = {
   width: 1080,
@@ -19,8 +19,17 @@ const color: ExportColor = { profile: "apple-log", lutExpectsLog: true, lut, int
 
 describe("plano de exportação", () => {
   it("mantém resolução, proporção e orientação da origem", () => {
-    const plan = planExport(source, color);
+    // Gravado em 1920×1080 com rotação 90: a saída é exibida em pé, 1080×1920.
+    const [width, height] = rotatedSize(1920, 1080, 90);
+    const plan = planExport({ ...source, width, height }, color);
     expect([plan.width, plan.height, plan.rotation]).toEqual([1080, 1920, 90]);
+  });
+
+  it("só 90 e 270 trocam largura e altura", () => {
+    expect(rotatedSize(1920, 1080, 0)).toEqual([1920, 1080]);
+    expect(rotatedSize(1920, 1080, 90)).toEqual([1080, 1920]);
+    expect(rotatedSize(1920, 1080, 180)).toEqual([1920, 1080]);
+    expect(rotatedSize(1920, 1080, 270)).toEqual([1080, 1920]);
   });
 
   it("mantém a taxa de quadros e a duração da origem", () => {
@@ -124,5 +133,28 @@ describe("memória", () => {
     expect(needsMemoryWarning(2 * 1024 ** 3, false)).toBe(true);
     expect(needsMemoryWarning(2 * 1024 ** 3, true)).toBe(false);
     expect(needsMemoryWarning(50 * 1024 ** 2, false)).toBe(false);
+  });
+});
+
+async function* packetsOf(list: { timestamp: number; duration: number }[]) {
+  for (const packet of list) yield packet;
+}
+
+describe("quadros esperados", () => {
+  const all = [0, 1, 2, 3].map((n) => ({ timestamp: n * 0.5, duration: 0.5 }));
+
+  it("conta todos os pacotes quando o arquivo começa em 0", async () => {
+    expect(await countPlayedPackets(packetsOf(all), 0)).toBe(4);
+  });
+
+  it("não conta pacotes que terminam antes do início real (corte com -c copy)", async () => {
+    // Início em 1.0: o pacote 0.5–1.0 termina exatamente no início e é descartado; sobram 2.
+    expect(await countPlayedPackets(packetsOf(all), 1)).toBe(2);
+    expect(await countPlayedPackets(packetsOf(all), 0.75)).toBe(3);
+  });
+
+  it("instante negativo vale 0: pacotes com início negativo que terminam depois de 0 contam", async () => {
+    const list = [{ timestamp: -0.5, duration: 0.25 }, { timestamp: -0.25, duration: 0.5 }, { timestamp: 0.25, duration: 0.5 }];
+    expect(await countPlayedPackets(packetsOf(list), -0.5)).toBe(2);
   });
 });
