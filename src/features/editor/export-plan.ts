@@ -15,6 +15,22 @@ export type ExportSource = {
   transfer: string | null; // transferência de cor declarada; pq/hlg = HDR
 };
 
+/** Dimensões exibidas: a rotação de 90/270 troca largura e altura (a mesma regra do Mediabunny). */
+export function rotatedSize(width: number, height: number, rotation: ExportSource["rotation"]): [number, number] {
+  return rotation % 180 === 0 ? [width, height] : [height, width];
+}
+
+/**
+ * Quadros que a conversão realmente entrega: a Conversion descarta pacotes que terminam antes do início real
+ * (corte com `-c copy`, edit list), então só contam os que passam de max(primeiro instante, 0).
+ */
+export async function countPlayedPackets(packets: AsyncIterable<{ timestamp: number; duration: number }>, firstTimestamp: number): Promise<number> {
+  const start = Math.max(firstTimestamp, 0);
+  let count = 0;
+  for await (const packet of packets) if (packet.timestamp + packet.duration > start) count += 1;
+  return count;
+}
+
 /** Estado de cor do editor no momento do clique: é o que a prévia usa. */
 export type ExportColor = { profile: SourceProfile; lutExpectsLog: boolean; lut: CubeLut | null; intensity: number };
 
