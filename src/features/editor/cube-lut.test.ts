@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  MAX_CUBE_LUT_BYTES,
+  MAX_CUBE_LUT_CHARS,
+  MAX_CUBE_LUT_FILE_BYTES,
   parseCubeLut,
   readCubeLutFile,
   type CubeLutErrorCode,
@@ -155,8 +156,8 @@ describe("parseCubeLut", () => {
     expectError(parseCubeLut(""), "missing_size");
   });
 
-  it("rejeita texto acima do limite de bytes antes de processar", () => {
-    expectError(parseCubeLut("a".repeat(MAX_CUBE_LUT_BYTES + 1)), "too_large");
+  it("rejeita texto acima do limite de caracteres antes de processar", () => {
+    expectError(parseCubeLut("a".repeat(MAX_CUBE_LUT_CHARS + 1)), "too_large");
   });
 
   it("rejeita token numérico inválido gigante sem travar (sem backtracking quadrático)", () => {
@@ -179,6 +180,49 @@ describe("parseCubeLut", () => {
     }
   });
 
+  it("lê LUT_3D_INPUT_RANGE como domínio igual nos três canais", () => {
+    const result = parseCubeLut(cube(["LUT_3D_SIZE 2", "LUT_3D_INPUT_RANGE -0.5 2"]));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.lut.domainMin).toEqual([-0.5, -0.5, -0.5]);
+    expect(result.lut.domainMax).toEqual([2, 2, 2]);
+  });
+
+  it("rejeita LUT_3D_INPUT_RANGE inválido ou combinado com DOMAIN_MIN/MAX", () => {
+    for (const range of ["1 1", "2 1", "0", "0 1 2", "0 x", "0 Infinity"]) {
+      expectError(
+        parseCubeLut(cube(["LUT_3D_SIZE 2", `LUT_3D_INPUT_RANGE ${range}`])),
+        "invalid_domain",
+      );
+    }
+    expectError(
+      parseCubeLut(cube(["LUT_3D_SIZE 2", "DOMAIN_MIN 0 0 0", "LUT_3D_INPUT_RANGE 0 1"])),
+      "invalid_domain",
+    );
+    expectError(
+      parseCubeLut(cube(["LUT_3D_SIZE 2", "LUT_3D_INPUT_RANGE 0 1", "DOMAIN_MAX 1 1 1"])),
+      "invalid_domain",
+    );
+  });
+
+  it("rejeita palavra-chave desconhecida sem ecoar o conteúdo do arquivo", () => {
+    const result = parseCubeLut(cube(["LUT_3D_SIZE 2", "LUT_IN_VIDEO_RANGE 16 235"]));
+    expectError(result, "unsupported_keyword");
+    if (!result.ok) expect(result.error.message).not.toMatch(/LUT_IN_VIDEO_RANGE|235/);
+  });
+
+  it("rejeita palavra-chave depois de linhas de dados", () => {
+    for (const keyword of ["DOMAIN_MAX 1 1 1", "TITLE \"x\"", "LUT_3D_INPUT_RANGE 0 1"]) {
+      expectError(parseCubeLut(cube(["LUT_3D_SIZE 2"], [...EIGHT_ROWS, keyword])), "invalid_value");
+    }
+  });
+
+  it("rejeita DOMAIN_MIN ou DOMAIN_MAX repetido", () => {
+    for (const name of ["DOMAIN_MIN 0 0 0", "DOMAIN_MAX 1 1 1"]) {
+      expectError(parseCubeLut(cube(["LUT_3D_SIZE 2", name, name])), "invalid_value");
+    }
+  });
+
   it("mantém valores de tabela fora de [0,1] sem alterar", () => {
     const result = parseCubeLut(
       cube(["LUT_3D_SIZE 2"], ["1.2 -0.5 2", ...EIGHT_ROWS.slice(1)]),
@@ -190,27 +234,31 @@ describe("parseCubeLut", () => {
     );
   });
 
-  it("cada código de erro tem mensagem em pt-BR sem stack nem caminho de arquivo", () => {
-    const failures = [
-      parseCubeLut("a".repeat(MAX_CUBE_LUT_BYTES + 1)),
-      parseCubeLut(""),
-      parseCubeLut(cube(["LUT_1D_SIZE 2"])),
-      parseCubeLut(cube(["LUT_3D_SIZE 1"])),
-      parseCubeLut(cube(["LUT_3D_SIZE 2"], [])),
-      parseCubeLut(cube(["LUT_3D_SIZE 2"], ["x y z"])),
-      parseCubeLut(
-        cube(["LUT_3D_SIZE 2", "DOMAIN_MIN 1 1 1", "DOMAIN_MAX 0 0 0"]),
-      ),
-    ];
-    const codes = new Set<string>();
-    for (const result of failures) {
-      expect(result.ok).toBe(false);
+  it("cada código de erro tem mensagem em pt-BR sem stack nem caminho de arquivo", async () => {
+    const valid = cube(["LUT_3D_SIZE 2"]);
+    const unreadable = new File([valid], "x.cube");
+    unreadable.text = () => Promise.reject(new Error("falha interna em /tmp/x.ts"));
+    // Record exige um gatilho para cada código: um código novo quebra o typecheck aqui.
+    const triggers: Record<CubeLutErrorCode, () => CubeLutResult | Promise<CubeLutResult>> = {
+      too_large: () => parseCubeLut("a".repeat(MAX_CUBE_LUT_CHARS + 1)),
+      invalid_extension: () => readCubeLutFile(new File([valid], "x.txt")),
+      read_failed: () => readCubeLutFile(unreadable),
+      missing_size: () => parseCubeLut(""),
+      unsupported_1d: () => parseCubeLut(cube(["LUT_1D_SIZE 2"])),
+      unsupported_size: () => parseCubeLut(cube(["LUT_3D_SIZE 1"])),
+      invalid_domain: () =>
+        parseCubeLut(cube(["LUT_3D_SIZE 2", "DOMAIN_MIN 1 1 1", "DOMAIN_MAX 0 0 0"])),
+      unsupported_keyword: () => parseCubeLut(cube(["LUT_3D_SIZE 2", "LUT_IN_VIDEO_RANGE 1 2"])),
+      row_count_mismatch: () => parseCubeLut(cube(["LUT_3D_SIZE 2"], [])),
+      invalid_value: () => parseCubeLut(cube(["LUT_3D_SIZE 2"], ["x y z"])),
+    };
+    for (const [code, trigger] of Object.entries(triggers)) {
+      const result = await trigger();
+      expectError(result, code as CubeLutErrorCode);
       if (result.ok) continue;
-      codes.add(result.error.code);
-      expect(result.error.message).toMatch(/\b(de|do|da|em|para|não|precisa|contém)\b/);
+      expect(result.error.message).toMatch(/(?:^|\s)(?:de|do|da|em|para|não|precisa|contém|usa)(?=[\s.:,]|$)/i);
       expect(result.error.message).not.toMatch(/\bat \w|Error|\.ts|[/\\]/);
     }
-    expect(codes.size).toBe(failures.length);
   });
 });
 
@@ -228,7 +276,7 @@ describe("readCubeLutFile", () => {
   });
 
   it("rejeita arquivo acima do limite pelo tamanho, sem ler o conteúdo", async () => {
-    const big = new File([new Uint8Array(MAX_CUBE_LUT_BYTES + 1)], "big.cube");
+    const big = new File([new Uint8Array(MAX_CUBE_LUT_FILE_BYTES + 1)], "big.cube");
     expectError(await readCubeLutFile(big), "too_large");
   });
 
