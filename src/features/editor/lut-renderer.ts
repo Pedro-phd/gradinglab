@@ -1,4 +1,5 @@
 // WebGL2: cada quadro do <video> vira textura 2D e o shader aplica a LUT 3D. Sem readPixels, sem rede.
+import { NORMALIZE_APPLE_LOG_GLSL } from "./apple-log";
 import type { CubeLut } from "./cube-lut";
 import { clamp01, lutTexture } from "./lut-math";
 
@@ -6,6 +7,8 @@ export type LutRenderer = {
   setLut(lut: CubeLut | null): void;
   setIntensity(intensity: number): void; // fração 0..1
   setCompare(split: number, showOriginal: boolean): void; // à esquerda de split (fração 0..1 da largura) vai a base
+  /** normalizedBase: o "antes" é o Apple Log convertido; lookInput: a LUT também recebe a imagem convertida. */
+  setNormalization(normalization: { normalizedBase: boolean; lookInput: boolean }): void;
   draw(): void; // quadro atual do vídeo; nada se ainda não há quadro
   dispose(): void;
 };
@@ -31,8 +34,12 @@ uniform float uOffset;
 uniform float uIntensity;
 uniform float uSplit;
 uniform bool uShowOriginal;
+uniform bool uNormalizedBase;
+uniform bool uNormalizedLookInput;
 in vec2 vUv;
 out vec4 outColor;
+
+${NORMALIZE_APPLE_LOG_GLSL}
 
 vec3 applyLook(vec3 base) {
   vec3 coord = clamp((base - uDomainMin) / (uDomainMax - uDomainMin), 0.0, 1.0);
@@ -41,9 +48,12 @@ vec3 applyLook(vec3 base) {
 
 void main() {
   vec3 raw = texture(uFrame, vUv).rgb; // quadro como veio do vídeo: é o que "Original" mostra
-  vec3 base = raw; // card 5: normalizar o perfil/Log aqui; é a única linha a trocar
+  // Normalização (Apple Log → Rec.709) antes da LUT; o plano decide o que é base e o que entra na LUT.
+  vec3 normalized = (uNormalizedBase || uNormalizedLookInput) ? normalizeAppleLog(raw) : raw;
+  vec3 base = uNormalizedBase ? normalized : raw;
+  vec3 lookInput = uNormalizedLookInput ? normalized : raw;
   // Mesmo quadro nos dois lados do divisor: esquerda = base, direita = base com o look.
-  outColor = vec4(uShowOriginal ? raw : (vUv.x < uSplit ? base : mix(base, applyLook(base), uIntensity)), 1.0);
+  outColor = vec4(uShowOriginal ? raw : (vUv.x < uSplit ? base : mix(base, applyLook(lookInput), uIntensity)), 1.0);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -73,6 +83,7 @@ export function createLutRenderer(
   let intensity = 0;
   let split = 0; // 0 = só o resultado
   let showOriginal = false;
+  let normalization = { normalizedBase: false, lookInput: false };
   let lost = context.isContextLost(); // canvas reaproveitado depois de um dispose
   const lose = loseContext.get(canvas) ?? gl.getExtension("WEBGL_lose_context");
   loseContext.set(canvas, lose);
@@ -110,7 +121,7 @@ export function createLutRenderer(
     gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error("shader");
-    for (const name of ["uFrame", "uLut", "uDomainMin", "uDomainMax", "uScale", "uOffset", "uIntensity", "uSplit", "uShowOriginal"]) {
+    for (const name of ["uFrame", "uLut", "uDomainMin", "uDomainMax", "uScale", "uOffset", "uIntensity", "uSplit", "uShowOriginal", "uNormalizedBase", "uNormalizedLookInput"]) {
       uniforms[name] = gl.getUniformLocation(program, name);
     }
     frameTexture = createTexture(gl.TEXTURE0, gl.TEXTURE_2D);
@@ -139,6 +150,8 @@ export function createLutRenderer(
     gl.uniform1f(uniforms.uIntensity, intensity);
     gl.uniform1f(uniforms.uSplit, split);
     gl.uniform1i(uniforms.uShowOriginal, showOriginal ? 1 : 0);
+    gl.uniform1i(uniforms.uNormalizedBase, normalization.normalizedBase ? 1 : 0);
+    gl.uniform1i(uniforms.uNormalizedLookInput, normalization.lookInput ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -173,6 +186,7 @@ export function createLutRenderer(
       split = clamp01(nextSplit);
       showOriginal = nextShowOriginal;
     },
+    setNormalization: (next) => void (normalization = next),
     draw,
     dispose() {
       canvas.removeEventListener("webglcontextlost", onContextLost);

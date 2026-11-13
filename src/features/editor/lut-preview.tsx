@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { createLutRenderer, type LutRenderer } from "./lut-renderer";
 import type { CubeLut } from "./cube-lut";
+import type { FrameColorInfo } from "./color-pipeline";
 import { formatDuration } from "./local-video";
 import { compareView, nextTime, type CompareMode } from "./compare";
 import { CompareOverlay, ModeGroup } from "./compare-overlay";
@@ -14,15 +15,31 @@ type Props = {
   intensity: number; // fração 0..1 do look
   lutName: string | null;
   intensityPercent: number; // só para o rótulo "Depois"
+  normalizedBase: boolean; // o "antes" é o Apple Log convertido para Rec.709
+  normalizedLookInput: boolean; // a LUT recebe a imagem convertida
+  onFrameColor: (info: FrameColorInfo | null) => void; // o que o navegador informa sobre o quadro
   unsupported: boolean; // sem WebGL2: vídeo puro, com os controles nativos
   onUnsupported: () => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
   onVideoError: (event: SyntheticEvent<HTMLVideoElement>) => void;
 };
 
+// Só o que o navegador declara sobre o espaço de cor do quadro; sem VideoFrame (ou sem quadro) não há dado.
+function readFrameColor(video: HTMLVideoElement): FrameColorInfo | null {
+  if (typeof VideoFrame === "undefined") return null;
+  try {
+    const frame = new VideoFrame(video);
+    const { primaries, transfer } = frame.colorSpace;
+    frame.close();
+    return { primaries, transfer };
+  } catch {
+    return null;
+  }
+}
+
 // O <video> segue como fonte dos quadros e do áudio, mas quem aparece é o canvas com a LUT.
 // Remontado a cada vídeo (key): ao sair, o efeito cancela o callback de quadros e libera a GPU.
-export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPercent, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
+export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPercent, normalizedBase, normalizedLookInput, onFrameColor, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<LutRenderer | null>(null);
@@ -55,28 +72,33 @@ export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPe
     };
     loop();
     // Pausado, o callback não dispara: redesenha ao carregar o primeiro quadro e depois de buscar.
-    video.addEventListener("loadeddata", renderer.draw);
+    const onLoadedData = () => {
+      renderer.draw();
+      onFrameColor(readFrameColor(video));
+    };
+    video.addEventListener("loadeddata", onLoadedData);
     video.addEventListener("seeked", renderer.draw);
 
     return () => {
       if (hasVideoCallback) video.cancelVideoFrameCallback(handle);
       else cancelAnimationFrame(handle);
-      video.removeEventListener("loadeddata", renderer.draw);
+      video.removeEventListener("loadeddata", onLoadedData);
       video.removeEventListener("seeked", renderer.draw);
       renderer.dispose();
       rendererRef.current = null;
     };
-  }, [onUnsupported]);
+  }, [onUnsupported, onFrameColor]);
 
-  // Muda LUT, intensidade ou divisor: redesenha o quadro atual, também com o vídeo pausado.
+  // Muda LUT, intensidade, plano de cor ou divisor: redesenha o quadro atual, também com o vídeo pausado.
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
     renderer.setLut(lut);
     renderer.setIntensity(intensity);
     renderer.setCompare(shaderSplit, showOriginal);
+    renderer.setNormalization({ normalizedBase, lookInput: normalizedLookInput });
     renderer.draw();
-  }, [lut, intensity, shaderSplit, showOriginal]);
+  }, [lut, intensity, shaderSplit, showOriginal, normalizedBase, normalizedLookInput]);
 
   // Lê o vídeo na hora: o updater do setState roda depois e o evento já não vale mais.
   function syncTime(video: HTMLVideoElement) {
