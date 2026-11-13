@@ -1,0 +1,31 @@
+{
+  "skills": {
+    "back": 8,
+    "debug": 1,
+    "front": 14,
+    "quality": 2,
+    "sec": 3,
+    "core": 1
+  },
+  "codex_tokens_estimate": 735,
+  "claude_tokens_estimate": 1339,
+  "claude_files": {
+    ".harness/ROUTER.md": 510,
+    "CLAUDE.md": 95,
+    "AGENTS.md": 735
+  },
+  "codex_largest_sections": [
+    [
+      "## Acordos",
+      272
+    ],
+    [
+      "## This is NOT the Next.js you know",
+      161
+    ],
+    [
+      "# GradingLab",
+      107
+    ]
+  ]
+}

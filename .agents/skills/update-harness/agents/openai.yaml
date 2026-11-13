@@ -1,0 +1,4 @@
+interface:
+  display_name: "Atualizar harness"
+  short_description: "Atualiza harness, ship-it, toolkit e suas skills"
+  default_prompt: "Use $update-harness para atualizar o harness deste projeto e verificar suas integrações."
