@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type ChangeEvent, type SyntheticEvent } from "react";
+import { readCubeLutFile } from "./cube-lut";
 import {
   describeDimensions,
   describeVideoError,
   formatDuration,
   validateVideoFile,
 } from "./local-video";
+import { LookPanel } from "./look-panel";
+import { LutPreview } from "./lut-preview";
+import { effectiveIntensity, initialLutState, lutReducer } from "./lut-state";
 
 type Metadata = { duration: number; width: number; height: number };
 
@@ -16,11 +20,17 @@ type State =
   | { kind: "video"; name: string; url: string; autoPlay: boolean; metadata: Metadata | null };
 
 const panel = "rounded-[28px] border border-white/10 bg-white/[.07] backdrop-blur-xl";
+// Por id: o foco do input da LUT não deve acender os labels do vídeo.
 const pill =
-  "inline-flex h-11 cursor-pointer items-center justify-center rounded-full px-5 text-sm font-semibold motion-safe:transition-colors group-has-[input:focus-visible]:outline-2 group-has-[input:focus-visible]:outline-offset-2 group-has-[input:focus-visible]:outline-white";
+  "inline-flex h-11 cursor-pointer items-center justify-center rounded-full px-5 text-sm font-semibold motion-safe:transition-colors group-has-[#video-input:focus-visible]:outline-2 group-has-[#video-input:focus-visible]:outline-offset-2 group-has-[#video-input:focus-visible]:outline-white";
 
 export function VideoPicker() {
   const [state, setState] = useState<State>({ kind: "empty" });
+  const [lutState, dispatchLut] = useReducer(lutReducer, initialLutState);
+  const [intensity, setIntensity] = useState(100);
+  const [unsupported, setUnsupported] = useState(false);
+  const lutRequest = useRef(0);
+  const markUnsupported = useCallback(() => setUnsupported(true), []);
   const url = state.kind === "video" ? state.url : null;
 
   // A URL local aponta para o arquivo no aparelho; libera ao trocar de vídeo ou sair da tela.
@@ -47,6 +57,7 @@ export function VideoPicker() {
       showError(result.error.message);
       return;
     }
+    setUnsupported(false);
     // Com movimento reduzido a prévia não toca sozinha; os controles continuam visíveis.
     const autoPlay = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     setState({
@@ -55,6 +66,14 @@ export function VideoPicker() {
       url: URL.createObjectURL(file),
       autoPlay,
       metadata: null,
+    });
+  }
+
+  // LUT inválida não derruba a prévia: o reducer mantém a anterior. Só a leitura da escolha mais recente vale.
+  function handleLutFile(file: File) {
+    const request = ++lutRequest.current;
+    void readCubeLutFile(file).then((result) => {
+      if (request === lutRequest.current) dispatchLut(result.ok ? { type: "loaded", lut: result.lut, name: file.name } : { type: "failed", message: result.error.message });
     });
   }
 
@@ -89,24 +108,24 @@ export function VideoPicker() {
       />
 
       {state.kind === "video" ? (
-        <>
-          <section aria-label="Prévia do vídeo" className="flex flex-1 items-start justify-center md:items-center">
-            <video
+        // No celular a intensidade fica logo abaixo do vídeo; no computador, no painel lateral.
+        <div className="grid flex-1 content-start gap-4 md:grid-cols-[minmax(0,1fr)_340px] md:grid-rows-[1fr_auto]">
+          <section aria-label="Prévia do vídeo" className="flex min-w-0 items-start justify-center md:items-center">
+            <LutPreview
               key={state.url}
               src={state.url}
-              controls
               autoPlay={state.autoPlay}
-              muted
-              playsInline
-              preload="metadata"
+              lut={lutState.lut}
+              intensity={effectiveIntensity(lutState, intensity)}
+              unsupported={unsupported}
+              onUnsupported={markUnsupported}
               onLoadedMetadata={handleMetadata}
-              onError={handleVideoError}
-              className="max-h-[70vh] w-full rounded-[28px] bg-black"
+              onVideoError={handleVideoError}
             />
           </section>
           <section
             aria-label="Informações do vídeo"
-            className={`${panel} flex flex-wrap items-center justify-between gap-4 p-4`}
+            className={`${panel} order-3 flex min-w-0 flex-wrap items-center justify-between gap-4 p-4 md:order-none`}
           >
             <div className="min-w-0">
               <h2 className="truncate font-display text-base font-semibold">{state.name}</h2>
@@ -118,7 +137,14 @@ export function VideoPicker() {
             </div>
             {label("Escolher outro vídeo", "border border-white/20 text-foreground hover:bg-white/10")}
           </section>
-        </>
+          <LookPanel
+            state={lutState}
+            unsupported={unsupported}
+            intensity={intensity}
+            onIntensityChange={setIntensity}
+            onLutFile={handleLutFile}
+          />
+        </div>
       ) : (
         <section
           aria-labelledby="entrada-titulo"
