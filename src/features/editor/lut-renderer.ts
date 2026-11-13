@@ -18,7 +18,6 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
-// Extensão: normalizeSource (perfil/Log) roda antes da LUT; o divisor antes/depois vira uniform em main().
 const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp sampler3D;
@@ -32,17 +31,13 @@ uniform float uIntensity;
 in vec2 vUv;
 out vec4 outColor;
 
-vec3 normalizeSource(vec3 color) {
-  return color;
-}
-
 vec3 applyLook(vec3 base) {
   vec3 coord = clamp((base - uDomainMin) / (uDomainMax - uDomainMin), 0.0, 1.0);
   return texture(uLut, coord * uScale + uOffset).rgb;
 }
 
 void main() {
-  vec3 base = normalizeSource(texture(uFrame, vUv).rgb);
+  vec3 base = texture(uFrame, vUv).rgb; // card 5: normalizar o perfil/Log aqui, antes da LUT
   outColor = vec4(mix(base, applyLook(base), uIntensity), 1.0);
 }`;
 
@@ -54,10 +49,14 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
   return shader; // erro de compilação aparece no link
 }
 
+// Num contexto perdido getExtension devolve null; guardar a extensão permite reaproveitar o canvas (Strict Mode).
+const loseContext = new WeakMap<HTMLCanvasElement, WEBGL_lose_context | null>();
+
 /** Devolve null quando o navegador não oferece WebGL2 ou o shader não compila. */
 export function createLutRenderer(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
+  onUnsupported: () => void, // falha ao recriar os recursos depois de perder o contexto
 ): LutRenderer | null {
   const context = canvas.getContext("webgl2", { alpha: false, antialias: false });
   if (!context) return null;
@@ -67,7 +66,9 @@ export function createLutRenderer(
   const noLut: ReturnType<typeof lutTexture> = { size: 1, data: new Float32Array(3), domainMin: [0, 0, 0], domainMax: [1, 1, 1], scale: 1, offset: 0 };
   let table = noLut;
   let intensity = 0;
-  let lost = false;
+  let lost = context.isContextLost(); // canvas reaproveitado depois de um dispose
+  const lose = loseContext.get(canvas) ?? gl.getExtension("WEBGL_lose_context");
+  loseContext.set(canvas, lose);
   let program: WebGLProgram | null = null;
   let frameTexture: WebGLTexture | null = null;
   let lutTextureHandle: WebGLTexture | null = null;
@@ -110,12 +111,6 @@ export function createLutRenderer(
     uploadLut();
   }
 
-  function release() {
-    gl.deleteProgram(program);
-    gl.deleteTexture(frameTexture);
-    gl.deleteTexture(lutTextureHandle);
-  }
-
   function draw() {
     // HAVE_CURRENT_DATA (2): já existe um quadro para enviar.
     if (lost || !program || video.readyState < 2 || video.videoWidth === 0) return;
@@ -128,13 +123,13 @@ export function createLutRenderer(
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, frameTexture);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-    gl.uniform1i(uniforms.uFrame!, 0);
-    gl.uniform1i(uniforms.uLut!, 1);
-    gl.uniform3fv(uniforms.uDomainMin!, table.domainMin);
-    gl.uniform3fv(uniforms.uDomainMax!, table.domainMax);
-    gl.uniform1f(uniforms.uScale!, table.scale);
-    gl.uniform1f(uniforms.uOffset!, table.offset);
-    gl.uniform1f(uniforms.uIntensity!, intensity);
+    gl.uniform1i(uniforms.uFrame, 0);
+    gl.uniform1i(uniforms.uLut, 1);
+    gl.uniform3fv(uniforms.uDomainMin, table.domainMin);
+    gl.uniform3fv(uniforms.uDomainMax, table.domainMax);
+    gl.uniform1f(uniforms.uScale, table.scale);
+    gl.uniform1f(uniforms.uOffset, table.offset);
+    gl.uniform1f(uniforms.uIntensity, intensity);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -144,16 +139,18 @@ export function createLutRenderer(
   }
   function onContextRestored() {
     lost = false;
-    init();
-    draw();
+    try {
+      init();
+      draw();
+    } catch {
+      program = null; // draw() passa a não fazer nada
+      onUnsupported();
+    }
   }
 
-  try {
-    init();
-  } catch {
-    release();
-    return null;
-  }
+  // Canvas reaproveitado: o navegador só aceita restaurar depois do evento de perda (cancelado em onContextLost); init() roda em onContextRestored.
+  if (lost) setTimeout(() => lose?.restoreContext());
+  else try { init(); } catch { return null; }
   canvas.addEventListener("webglcontextlost", onContextLost);
   canvas.addEventListener("webglcontextrestored", onContextRestored);
 
@@ -162,14 +159,16 @@ export function createLutRenderer(
       table = next ? lutTexture(next) : noLut;
       if (!lost) uploadLut();
     },
-    setIntensity(next) {
-      intensity = clampIntensity(next);
-    },
+    setIntensity: (next) => void (intensity = clampIntensity(next)),
     draw,
     dispose() {
       canvas.removeEventListener("webglcontextlost", onContextLost);
       canvas.removeEventListener("webglcontextrestored", onContextRestored);
-      if (!lost) release();
+      if (lost) return;
+      gl.deleteProgram(program);
+      gl.deleteTexture(frameTexture);
+      gl.deleteTexture(lutTextureHandle);
+      lose?.loseContext(); // devolve a GPU sem esperar o coletor de lixo
     },
   };
 }

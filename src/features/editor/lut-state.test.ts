@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CubeLut } from "./cube-lut";
-import { canAdjustIntensity, effectiveIntensity, initialLutState, lutReducer } from "./lut-state";
+import { effectiveIntensity, initialLutState, lutReducer } from "./lut-state";
 
 const lut: CubeLut = {
   size: 2,
@@ -31,13 +31,12 @@ describe("estado da LUT no editor", () => {
   });
 
   it("sem LUT carregada, a prévia mostra a base e o controle de intensidade fica desabilitado", () => {
-    expect(canAdjustIntensity(initialLutState)).toBe(false);
+    expect(initialLutState.lut).toBeNull();
     expect(effectiveIntensity(initialLutState, 80)).toBe(0);
   });
 
   it("com LUT, a intensidade em % vira fração limitada a 0..1", () => {
     const loaded = lutReducer(initialLutState, { type: "loaded", lut, name: "look.cube" });
-    expect(canAdjustIntensity(loaded)).toBe(true);
     expect(effectiveIntensity(loaded, 80)).toBe(0.8);
     expect(effectiveIntensity(loaded, 250)).toBe(1);
   });

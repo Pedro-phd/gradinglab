@@ -28,6 +28,8 @@ describe("mistura de intensidade", () => {
   });
 });
 
+// Estes testes cobrem só a preparação em JS (ordem dos eixos, escala/deslocamento, normalização).
+// O shader não é exercitado aqui: a conferência dele é a verificação manual no navegador.
 describe("preparo da LUT para a textura", () => {
   function lutOf(size: number, domainMax = 1): CubeLut {
     // Cada linha do arquivo vira um valor único: a linha n tem RGB (n, n, n).

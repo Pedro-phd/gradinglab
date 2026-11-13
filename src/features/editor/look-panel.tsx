@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChangeEvent } from "react";
-import { canAdjustIntensity, type LutState } from "./lut-state";
+import type { LutState } from "./lut-state";
 
 const panel = "rounded-[28px] border border-white/10 bg-white/[.07] backdrop-blur-xl";
 const pill =
@@ -9,13 +9,14 @@ const pill =
 
 type Props = {
   state: LutState;
+  unsupported: boolean; // sem WebGL2 não há como aplicar o look
   intensity: number; // percentual 0..100
   onIntensityChange: (percent: number) => void;
   onLutFile: (file: File) => void;
 };
 
-export function LookPanel({ state, intensity, onIntensityChange, onLutFile }: Props) {
-  const enabled = canAdjustIntensity(state);
+export function LookPanel({ state, unsupported, intensity, onIntensityChange, onLutFile }: Props) {
+  const enabled = state.lut !== null && !unsupported;
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = ""; // permite escolher o mesmo arquivo de novo
@@ -38,10 +39,10 @@ export function LookPanel({ state, intensity, onIntensityChange, onLutFile }: Pr
             <p className="text-xs text-muted">{state.lut ? `LUT 3D · ${state.lut.size} pontos` : "Arquivo .cube 3D, lido neste aparelho."}</p>
           </div>
           {/* O input fica fora do fluxo visual, mas focável; o foco acende o label logo depois dele. */}
-          <input id="lut-input" type="file" accept=".cube" onChange={handleFile} className="peer sr-only" />
+          <input id="lut-input" type="file" accept=".cube" disabled={unsupported} onChange={handleFile} className="peer sr-only" />
           <label
             htmlFor="lut-input"
-            className={`${pill} ${state.lut ? "border border-white/20 hover:bg-white/10" : "bg-accent text-accent-ink hover:brightness-110"}`}
+            className={`${pill} peer-disabled:cursor-not-allowed peer-disabled:opacity-40 ${state.lut ? "border border-white/20 hover:bg-white/10" : "bg-accent text-accent-ink hover:brightness-110"}`}
           >{state.lut ? "Trocar" : "Importar LUT"}</label>
         </div>
       </section>
@@ -68,7 +69,7 @@ export function LookPanel({ state, intensity, onIntensityChange, onLutFile }: Pr
           <span>0% · sem look</span>
           <span>100% · look integral</span>
         </div>
-        {!enabled && <p className="text-xs text-muted">Importe uma LUT para ajustar a intensidade.</p>}
+        {!enabled && <p className="text-xs text-muted">{unsupported ? "Indisponível sem WebGL2." : "Importe uma LUT para ajustar a intensidade."}</p>}
       </section>
     </aside>
   );

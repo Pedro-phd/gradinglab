@@ -20,10 +20,6 @@ export function lutReducer(state: LutState, action: LutAction): LutState {
   return { ...state, error: { message: action.message, attempt: (state.error?.attempt ?? 0) + 1 } };
 }
 
-export function canAdjustIntensity(state: LutState): boolean {
-  return state.lut !== null;
-}
-
 /** Intensidade em % (0..100) → fração para o renderizador; sem LUT a prévia é a base. */
 export function effectiveIntensity(state: LutState, percent: number): number {
   return state.lut ? clampIntensity(percent / 100) : 0;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useState, type ChangeEvent, type SyntheticEvent } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type ChangeEvent, type SyntheticEvent } from "react";
 import { readCubeLutFile } from "./cube-lut";
 import {
   describeDimensions,
@@ -28,6 +28,9 @@ export function VideoPicker() {
   const [state, setState] = useState<State>({ kind: "empty" });
   const [lutState, dispatchLut] = useReducer(lutReducer, initialLutState);
   const [intensity, setIntensity] = useState(100);
+  const [unsupported, setUnsupported] = useState(false);
+  const lutRequest = useRef(0);
+  const markUnsupported = useCallback(() => setUnsupported(true), []);
   const url = state.kind === "video" ? state.url : null;
 
   // A URL local aponta para o arquivo no aparelho; libera ao trocar de vídeo ou sair da tela.
@@ -54,6 +57,7 @@ export function VideoPicker() {
       showError(result.error.message);
       return;
     }
+    setUnsupported(false);
     // Com movimento reduzido a prévia não toca sozinha; os controles continuam visíveis.
     const autoPlay = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     setState({
@@ -65,15 +69,12 @@ export function VideoPicker() {
     });
   }
 
-  // LUT inválida não derruba a prévia: o reducer mantém a anterior e só mostra o erro.
+  // LUT inválida não derruba a prévia: o reducer mantém a anterior. Só a leitura da escolha mais recente vale.
   function handleLutFile(file: File) {
-    void readCubeLutFile(file).then((result) =>
-      dispatchLut(
-        result.ok
-          ? { type: "loaded", lut: result.lut, name: file.name }
-          : { type: "failed", message: result.error.message },
-      ),
-    );
+    const request = ++lutRequest.current;
+    void readCubeLutFile(file).then((result) => {
+      if (request === lutRequest.current) dispatchLut(result.ok ? { type: "loaded", lut: result.lut, name: file.name } : { type: "failed", message: result.error.message });
+    });
   }
 
   function handleMetadata(event: SyntheticEvent<HTMLVideoElement>) {
@@ -116,6 +117,8 @@ export function VideoPicker() {
               autoPlay={state.autoPlay}
               lut={lutState.lut}
               intensity={effectiveIntensity(lutState, intensity)}
+              unsupported={unsupported}
+              onUnsupported={markUnsupported}
               onLoadedMetadata={handleMetadata}
               onVideoError={handleVideoError}
             />
@@ -136,6 +139,7 @@ export function VideoPicker() {
           </section>
           <LookPanel
             state={lutState}
+            unsupported={unsupported}
             intensity={intensity}
             onIntensityChange={setIntensity}
             onLutFile={handleLutFile}

@@ -10,27 +10,29 @@ type Props = {
   autoPlay: boolean;
   lut: CubeLut | null;
   intensity: number; // fração 0..1 do look
+  unsupported: boolean; // sem WebGL2: vídeo puro, com os controles nativos
+  onUnsupported: () => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
   onVideoError: (event: SyntheticEvent<HTMLVideoElement>) => void;
 };
 
 // O <video> segue como fonte dos quadros e do áudio, mas quem aparece é o canvas com a LUT.
 // Remontado a cada vídeo (key): ao sair, o efeito cancela o callback de quadros e libera a GPU.
-export function LutPreview({ src, autoPlay, lut, intensity, onLoadedMetadata, onVideoError }: Props) {
+export function LutPreview({ src, autoPlay, lut, intensity, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<LutRenderer | null>(null);
-  const [unsupported, setUnsupported] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true); // começa mudo para o autoplay ser aceito
   const [time, setTime] = useState({ current: 0, duration: 0 });
 
   useEffect(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
-    const renderer = createLutRenderer(canvas, video);
+    const renderer = createLutRenderer(canvas, video, onUnsupported);
     if (!renderer) {
-      setUnsupported(true);
+      onUnsupported();
       return;
     }
     rendererRef.current = renderer;
@@ -55,7 +57,7 @@ export function LutPreview({ src, autoPlay, lut, intensity, onLoadedMetadata, on
       renderer.dispose();
       rendererRef.current = null;
     };
-  }, []);
+  }, [onUnsupported]);
 
   // Muda LUT ou intensidade: redesenha o quadro atual, também com o vídeo pausado.
   useEffect(() => {
@@ -97,8 +99,7 @@ export function LutPreview({ src, autoPlay, lut, intensity, onLoadedMetadata, on
           ref={videoRef}
           src={src}
           autoPlay={autoPlay}
-          muted
-          playsInline
+          muted onVolumeChange={(event) => setMuted(event.currentTarget.muted)} playsInline
           preload="metadata"
           controls={unsupported}
           onLoadedMetadata={(event) => {
@@ -125,6 +126,7 @@ export function LutPreview({ src, autoPlay, lut, intensity, onLoadedMetadata, on
             type="range"
             aria-label="Posição no vídeo"
             min={0}
+            aria-valuetext={formatDuration(time.current)}
             max={time.duration}
             step="any"
             value={time.current}
@@ -133,6 +135,9 @@ export function LutPreview({ src, autoPlay, lut, intensity, onLoadedMetadata, on
             }}
             className="h-11 min-w-40 flex-1 cursor-pointer accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           />
+          <button type="button" aria-pressed={!muted} onClick={() => videoRef.current && (videoRef.current.muted = !muted)} className="h-11 rounded-full border border-white/20 px-4 text-sm font-semibold hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+            {muted ? "Ativar som" : "Silenciar"}
+          </button>
           <span className="text-sm tabular-nums text-muted">{formatDuration(time.current)} / {formatDuration(time.duration)}</span>
         </div>
       )}
