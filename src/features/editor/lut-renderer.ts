@@ -101,7 +101,8 @@ export function createLutRenderer(
   video: HTMLVideoElement | null,
   onUnsupported: () => void, // falha ao recriar os recursos depois de perder o contexto
 ): LutRenderer | null {
-  const context = canvas.getContext("webgl2", { alpha: false, antialias: false });
+  // Cast: com a união HTMLCanvasElement | OffscreenCanvas, algumas versões do TypeScript resolvem getContext para o tipo genérico.
+  const context = canvas.getContext("webgl2", { alpha: false, antialias: false }) as WebGL2RenderingContext | null;
   if (!context) return null;
   const gl: WebGL2RenderingContext = context;
 
