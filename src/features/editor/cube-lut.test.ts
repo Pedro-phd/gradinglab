@@ -159,6 +159,26 @@ describe("parseCubeLut", () => {
     expectError(parseCubeLut("a".repeat(MAX_CUBE_LUT_BYTES + 1)), "too_large");
   });
 
+  it("rejeita token numérico inválido gigante sem travar (sem backtracking quadrático)", () => {
+    const text = cube(["LUT_3D_SIZE 2"], [`${"1".repeat(200_000)}x 0 0`, ...EIGHT_ROWS.slice(1)]);
+    const start = performance.now();
+    expectError(parseCubeLut(text), "invalid_value");
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it("aceita formatos decimais válidos e rejeita os inválidos", () => {
+    for (const ok of ["1e-3", ".5", "5.", "-.5e+1", "+2"]) {
+      const result = parseCubeLut(cube(["LUT_3D_SIZE 2"], [`${ok} 0 0`, ...EIGHT_ROWS.slice(1)]));
+      expect(result.ok).toBe(true);
+    }
+    for (const bad of ["1e", ".", "0x1", "Infinity", "--1"]) {
+      expectError(
+        parseCubeLut(cube(["LUT_3D_SIZE 2"], [`${bad} 0 0`, ...EIGHT_ROWS.slice(1)])),
+        "invalid_value",
+      );
+    }
+  });
+
   it("mantém valores de tabela fora de [0,1] sem alterar", () => {
     const result = parseCubeLut(
       cube(["LUT_3D_SIZE 2"], ["1.2 -0.5 2", ...EIGHT_ROWS.slice(1)]),

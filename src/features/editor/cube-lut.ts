@@ -40,7 +40,8 @@ function fail(code: CubeLutErrorCode): CubeLutResult {
 }
 
 // Number() aceitaria "0x10" e "Infinity"; aqui só decimal finito.
-const DECIMAL = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+// Sem quantificadores sobrepostos (\d+ seguido de \d* só após "."), para não ter backtracking quadrático.
+const DECIMAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 
 function parseNumber(token: string): number | null {
   if (!DECIMAL.test(token)) return null;
