@@ -7,14 +7,14 @@ import { hasIncrementalStorage, useExport } from "./use-export";
 
 type Props = {
   file: File;
-  lutName: string | null;
-  intensityPercent: number;
+  lutName: string | null; // vai no nome do arquivo: a última LUT da pilha (o look)
+  summary: string; // pilha e intensidade, para o progresso
   color: ExportColor;
   blocked: string | null; // por que ainda não dá para exportar (sem LUT, perfil não confirmado, sem WebGL2)
 };
 
 // Exporta o "depois" com o perfil, a LUT e a intensidade que a prévia está usando agora.
-export function ExportSection({ file, lutName, intensityPercent, color, blocked }: Props) {
+export function ExportSection({ file, lutName, summary, color, blocked }: Props) {
   const { state, downloadUrl, start, cancel } = useExport();
   const link = useRef<HTMLAnchorElement>(null);
   const active = state.status === "preparing" || state.status === "encoding" || state.status === "finalizing";
@@ -28,11 +28,6 @@ export function ExportSection({ file, lutName, intensityPercent, color, blocked 
   return (
     <section aria-labelledby="exportar-titulo" className="flex flex-col gap-3">
       <h2 id="exportar-titulo" className="font-display text-[15px] font-semibold">Exportar</h2>
-      <ul aria-label="O que sai no arquivo" className="flex flex-wrap gap-2 text-xs">
-        {["MP4 · H.264 (SDR)", "Resolução original", "Áudio preservado"].map((text) => (
-          <li key={text} className="rounded-full bg-black/30 px-3 py-2">{text}</li>
-        ))}
-      </ul>
       {state.status === "failed" && state.error && <p role="alert" className="rounded-2xl bg-red-500/15 px-4 py-3 text-sm text-red-200">{state.error.message}</p>}
       {state.status === "cancelled" && <p role="status" className="rounded-2xl bg-white/10 px-4 py-3 text-sm">Exportação cancelada. Nada foi baixado e o vídeo original continua aberto.</p>}
       {state.status === "done" && downloadUrl && (
@@ -60,8 +55,8 @@ export function ExportSection({ file, lutName, intensityPercent, color, blocked 
           {blocked && <p className="text-center text-xs text-muted">{blocked}</p>}
         </>
       )}
-      <p className="text-center text-xs leading-normal text-muted">O arquivo original não é alterado nem enviado. A compressão tem perdas: o resultado não é idêntico pixel a pixel à prévia.</p>
-      {active && <ExportProgress state={state} summary={`${file.name} · ${lutName ?? "sem LUT"} · ${intensityPercent}%`} onCancel={cancel} />}
+      <p className="text-center text-xs leading-normal text-muted">MP4 na resolução original, com o áudio. O arquivo original não é alterado nem enviado.</p>
+      {active && <ExportProgress state={state} summary={`${file.name} · ${summary}`} onCancel={cancel} />}
     </section>
   );
 }

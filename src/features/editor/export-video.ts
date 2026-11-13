@@ -78,9 +78,8 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, emi
     renderer = createLutRenderer(canvas, null, () => undefined);
     if (!renderer) throw new ExportFailure("webgl_unavailable");
     const colorPlan = planPipeline(color.profile, color.lutExpectsLog);
-    renderer.setLut(color.lut);
-    renderer.setIntensity(color.intensity);
-    renderer.setNormalization({ normalizedBase: colorPlan.normalizedBase, lookInput: colorPlan.normalize });
+    renderer.setLayers(color.layers);
+    renderer.setNormalization({ normalizedBase: colorPlan.normalizedBase, lookInput: colorPlan.normalize, lut: color.normalizationLut });
 
     // Em disco, quando o navegador deixa; senão fica na memória (a tela avisa quando o original é grande).
     writable = request.handle && "createWritable" in request.handle ? await request.handle.createWritable() : null;

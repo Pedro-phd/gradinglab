@@ -15,7 +15,7 @@ const source: ExportSource = {
 };
 
 const lut = { size: 2 } as CubeLut;
-const color: ExportColor = { profile: "apple-log", lutExpectsLog: true, lut, intensity: 0.8 };
+const color: ExportColor = { profile: "apple-log", lutExpectsLog: true, layers: [{ lut, intensity: 0.8 }] };
 
 describe("plano de exportação", () => {
   it("mantém resolução, proporção e orientação da origem", () => {
@@ -47,7 +47,7 @@ describe("plano de exportação", () => {
   it("leva o mesmo perfil, a mesma LUT e a mesma intensidade da prévia", () => {
     const plan = planExport(source, color);
     expect(plan.color).toEqual(color);
-    expect(plan.color.lut).toBe(lut);
+    expect(plan.color.layers[0]?.lut).toBe(lut);
   });
 
   it("não tem teto de duração", () => {

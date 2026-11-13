@@ -3,17 +3,21 @@
 import { NORMALIZE_APPLE_LOG_GLSL } from "./apple-log";
 import type { CubeLut } from "./cube-lut";
 import { clamp01, lutTexture } from "./lut-math";
+import { MAX_STACKED_LUTS, type LutLayer } from "./lut-state";
 
 export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 /** Quadro decodificado da exportação (ou o canvas que o Mediabunny entrega depois de girar). */
 export type FrameSource = VideoFrame | RenderCanvas;
 
+/** lut: tabela Apple Log → Rec.709 (a da Apple). Sem ela (ainda carregando ou falhou), vale o cálculo do shader. */
+export type Normalization = { normalizedBase: boolean; lookInput: boolean; lut?: CubeLut | null };
+
 export type LutRenderer = {
-  setLut(lut: CubeLut | null): void;
-  setIntensity(intensity: number): void; // fração 0..1
+  /** Pilha na ordem de aplicação; cada camada mistura o resultado anterior com a LUT pela própria intensidade. */
+  setLayers(layers: LutLayer[]): void;
   setCompare(split: number, showOriginal: boolean): void; // à esquerda de split (fração 0..1 da largura) vai a base
   /** normalizedBase: o "antes" é o Apple Log convertido; lookInput: a LUT também recebe a imagem convertida. */
-  setNormalization(normalization: { normalizedBase: boolean; lookInput: boolean }): void;
+  setNormalization(normalization: Normalization): void;
   draw(): void; // quadro atual do vídeo; nada se ainda não há quadro
   drawFrame(frame: FrameSource): void; // exportação: o canvas passa a ter o tamanho do quadro
   dispose(): void;
@@ -28,38 +32,56 @@ void main() {
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
+const LAYER_INDEXES = Array.from({ length: MAX_STACKED_LUTS }, (_, index) => index);
+// GLSL ES 3.00 só indexa array de sampler com constante: uma função e um passo por camada, sem laço.
+const LAYER_FUNCTIONS = LAYER_INDEXES.map((i) => `vec3 applyLut${i}(vec3 c) {
+  vec3 coord = clamp((c - uDomainMin[${i}]) / (uDomainMax[${i}] - uDomainMin[${i}]), 0.0, 1.0);
+  return texture(uLut[${i}], coord * uScale[${i}] + uOffset[${i}]).rgb;
+}`).join("\n");
+const LAYER_STEPS = LAYER_INDEXES.map((i) => `  if (uCount > ${i}) look = mix(look, applyLut${i}(${i === 0 ? "lookInput" : "look"}), uIntensity[${i}]);`).join("\n");
+
 const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp sampler3D;
 uniform sampler2D uFrame;
-uniform sampler3D uLut;
-uniform vec3 uDomainMin;
-uniform vec3 uDomainMax;
-uniform float uScale;
-uniform float uOffset;
-uniform float uIntensity;
+uniform sampler3D uLut[${MAX_STACKED_LUTS}];
+uniform vec3 uDomainMin[${MAX_STACKED_LUTS}];
+uniform vec3 uDomainMax[${MAX_STACKED_LUTS}];
+uniform float uScale[${MAX_STACKED_LUTS}];
+uniform float uOffset[${MAX_STACKED_LUTS}];
+uniform float uIntensity[${MAX_STACKED_LUTS}];
+uniform int uCount;
 uniform float uSplit;
 uniform bool uShowOriginal;
 uniform bool uNormalizedBase;
 uniform bool uNormalizedLookInput;
+uniform sampler3D uNormLut;
+uniform bool uUseNormLut;
+uniform float uNormScale;
+uniform float uNormOffset;
 in vec2 vUv;
 out vec4 outColor;
 
 ${NORMALIZE_APPLE_LOG_GLSL}
 
-vec3 applyLook(vec3 base) {
-  vec3 coord = clamp((base - uDomainMin) / (uDomainMax - uDomainMin), 0.0, 1.0);
-  return texture(uLut, coord * uScale + uOffset).rgb;
+${LAYER_FUNCTIONS}
+
+// A tabela da Apple cobre 0..1 nos três canais.
+vec3 convertLog(vec3 c) {
+  return uUseNormLut ? texture(uNormLut, clamp(c, 0.0, 1.0) * uNormScale + uNormOffset).rgb : normalizeAppleLog(c);
 }
 
 void main() {
   vec3 raw = texture(uFrame, vUv).rgb; // quadro como veio do vídeo: é o que "Original" mostra
   // Normalização (Apple Log → Rec.709) antes da LUT; o plano decide o que é base e o que entra na LUT.
-  vec3 normalized = (uNormalizedBase || uNormalizedLookInput) ? normalizeAppleLog(raw) : raw;
+  vec3 normalized = (uNormalizedBase || uNormalizedLookInput) ? convertLog(raw) : raw;
   vec3 base = uNormalizedBase ? normalized : raw;
   vec3 lookInput = uNormalizedLookInput ? normalized : raw;
-  // Mesmo quadro nos dois lados do divisor: esquerda = base, direita = base com o look.
-  outColor = vec4(uShowOriginal ? raw : (vUv.x < uSplit ? base : mix(base, applyLook(lookInput), uIntensity)), 1.0);
+  // A 1ª camada mistura a base com a LUT aplicada a lookInput; as seguintes recebem o resultado anterior.
+  vec3 look = base;
+${LAYER_STEPS}
+  // Mesmo quadro nos dois lados do divisor: esquerda = base, direita = base com a pilha.
+  outColor = vec4(uShowOriginal ? raw : (vUv.x < uSplit ? base : look), 1.0);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -85,17 +107,20 @@ export function createLutRenderer(
 
   // Sem LUT: 1 texel, só para o sampler ter o que ler (com intensidade 0 ele não aparece).
   const noLut: ReturnType<typeof lutTexture> = { size: 1, data: new Float32Array(3), domainMin: [0, 0, 0], domainMax: [1, 1, 1], scale: 1, offset: 0 };
-  let table = noLut;
-  let intensity = 0;
+  let layers: LutLayer[] = [];
+  const uploaded: (LutLayer["lut"] | null)[] = new Array(MAX_STACKED_LUTS).fill(null); // o que já está em cada textura
   let split = 0; // 0 = só o resultado
   let showOriginal = false;
-  let normalization = { normalizedBase: false, lookInput: false };
+  let normalization: Normalization = { normalizedBase: false, lookInput: false };
+  let uploadedNorm: CubeLut | null = null;
+  let normTexture: WebGLTexture | null = null;
+  const NORM_UNIT = MAX_STACKED_LUTS + 1; // depois do quadro (0) e das camadas (1..MAX)
   let lost = context.isContextLost(); // canvas reaproveitado depois de um dispose
   const lose = loseContext.get(canvas) ?? gl.getExtension("WEBGL_lose_context");
   loseContext.set(canvas, lose);
   let program: WebGLProgram | null = null;
   let frameTexture: WebGLTexture | null = null;
-  let lutTextureHandle: WebGLTexture | null = null;
+  let lutTextures: (WebGLTexture | null)[] = [];
   const uniforms: Record<string, WebGLUniformLocation | null> = {};
 
   function createTexture(unit: number, target: number) {
@@ -113,11 +138,25 @@ export function createLutRenderer(
   // RGB16F: no WebGL2 ele aceita filtro linear sem extensão, então a LUT fica em ponto flutuante
   // em qualquer navegador com WebGL2 e não há caminho de 8 bits. A interpolação é trilinear
   // (filtro linear 3D), não tetraédrica.
-  function uploadLut() {
-    const { size, data } = table;
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_3D, lutTextureHandle);
-    gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB16F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+  // Só reenvia a textura quando a LUT daquela posição mudou: mexer na intensidade não custa upload.
+  function uploadLuts(force = false) {
+    LAYER_INDEXES.forEach((i) => {
+      const lut = layers[i]?.lut ?? null;
+      if (!force && uploaded[i] === lut) return;
+      const { size, data } = lut ? lutTexture(lut) : noLut;
+      gl.activeTexture(gl.TEXTURE1 + i);
+      gl.bindTexture(gl.TEXTURE_3D, lutTextures[i]!);
+      gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB16F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+      uploaded[i] = lut;
+    });
+    const norm = normalization.lut ?? null;
+    if (force || uploadedNorm !== norm) {
+      const { size, data } = norm ? lutTexture(norm) : noLut;
+      gl.activeTexture(gl.TEXTURE0 + NORM_UNIT);
+      gl.bindTexture(gl.TEXTURE_3D, normTexture);
+      gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB16F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+      uploadedNorm = norm;
+    }
   }
 
   // Cria todos os recursos de GPU; também é o que roda depois de uma perda de contexto.
@@ -127,12 +166,13 @@ export function createLutRenderer(
     gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error("shader");
-    for (const name of ["uFrame", "uLut", "uDomainMin", "uDomainMax", "uScale", "uOffset", "uIntensity", "uSplit", "uShowOriginal", "uNormalizedBase", "uNormalizedLookInput"]) {
+    for (const name of ["uFrame", "uLut", "uDomainMin", "uDomainMax", "uScale", "uOffset", "uIntensity", "uCount", "uSplit", "uShowOriginal", "uNormalizedBase", "uNormalizedLookInput", "uNormLut", "uUseNormLut", "uNormScale", "uNormOffset"]) {
       uniforms[name] = gl.getUniformLocation(program, name);
     }
     frameTexture = createTexture(gl.TEXTURE0, gl.TEXTURE_2D);
-    lutTextureHandle = createTexture(gl.TEXTURE1, gl.TEXTURE_3D);
-    uploadLut();
+    lutTextures = LAYER_INDEXES.map((i) => createTexture(gl.TEXTURE1 + i, gl.TEXTURE_3D));
+    normTexture = createTexture(gl.TEXTURE0 + NORM_UNIT, gl.TEXTURE_3D);
+    uploadLuts(true);
   }
 
   function draw() {
@@ -161,16 +201,23 @@ export function createLutRenderer(
     // RGBA16F: a curva Log roda sobre ponto flutuante, não sobre 8 bits.
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, source);
     gl.uniform1i(uniforms.uFrame, 0);
-    gl.uniform1i(uniforms.uLut, 1);
-    gl.uniform3fv(uniforms.uDomainMin, table.domainMin);
-    gl.uniform3fv(uniforms.uDomainMax, table.domainMax);
-    gl.uniform1f(uniforms.uScale, table.scale);
-    gl.uniform1f(uniforms.uOffset, table.offset);
-    gl.uniform1f(uniforms.uIntensity, intensity);
+    const tables = LAYER_INDEXES.map((i) => (layers[i] ? lutTexture(layers[i].lut) : noLut));
+    gl.uniform1iv(uniforms.uLut, LAYER_INDEXES.map((i) => i + 1));
+    gl.uniform3fv(uniforms.uDomainMin, tables.flatMap((t) => t.domainMin));
+    gl.uniform3fv(uniforms.uDomainMax, tables.flatMap((t) => t.domainMax));
+    gl.uniform1fv(uniforms.uScale, tables.map((t) => t.scale));
+    gl.uniform1fv(uniforms.uOffset, tables.map((t) => t.offset));
+    gl.uniform1fv(uniforms.uIntensity, LAYER_INDEXES.map((i) => layers[i]?.intensity ?? 0));
+    gl.uniform1i(uniforms.uCount, layers.length);
     gl.uniform1f(uniforms.uSplit, split);
     gl.uniform1i(uniforms.uShowOriginal, showOriginal ? 1 : 0);
     gl.uniform1i(uniforms.uNormalizedBase, normalization.normalizedBase ? 1 : 0);
     gl.uniform1i(uniforms.uNormalizedLookInput, normalization.lookInput ? 1 : 0);
+    const norm = normalization.lut ? lutTexture(normalization.lut) : null;
+    gl.uniform1i(uniforms.uNormLut, NORM_UNIT);
+    gl.uniform1i(uniforms.uUseNormLut, norm ? 1 : 0);
+    gl.uniform1f(uniforms.uNormScale, norm?.scale ?? 1);
+    gl.uniform1f(uniforms.uNormOffset, norm?.offset ?? 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -196,16 +243,18 @@ export function createLutRenderer(
   canvas.addEventListener("webglcontextrestored", onContextRestored);
 
   return {
-    setLut(next) {
-      table = next ? lutTexture(next) : noLut;
-      if (!lost) uploadLut();
+    setLayers(next) {
+      layers = next.slice(0, MAX_STACKED_LUTS).map((layer) => ({ lut: layer.lut, intensity: clamp01(layer.intensity) }));
+      if (!lost) uploadLuts();
     },
-    setIntensity: (next) => void (intensity = clamp01(next)),
     setCompare(nextSplit, nextShowOriginal) {
       split = clamp01(nextSplit);
       showOriginal = nextShowOriginal;
     },
-    setNormalization: (next) => void (normalization = next),
+    setNormalization(next) {
+      normalization = next;
+      if (!lost) uploadLuts();
+    },
     draw,
     drawFrame,
     dispose() {
@@ -214,7 +263,8 @@ export function createLutRenderer(
       if (lost) return;
       gl.deleteProgram(program);
       gl.deleteTexture(frameTexture);
-      gl.deleteTexture(lutTextureHandle);
+      lutTextures.forEach((texture) => gl.deleteTexture(texture));
+      gl.deleteTexture(normTexture);
       lose?.loseContext(); // devolve a GPU sem esperar o coletor de lixo
     },
   };

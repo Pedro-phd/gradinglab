@@ -44,10 +44,16 @@ describe("sugestão de perfil", () => {
     expect(suggestProfile({ primaries: null, transfer: null })).toEqual({ profile: "unknown", source: "none" });
   });
 
-  it("não sugere Apple Log a partir de nome de arquivo, extensão ou aparência", () => {
+  it("Rec.2020 sem HDR é sugerido como Apple Log, marcado como vindo dos metadados", () => {
     // A função só recebe o que o navegador informa sobre o quadro: nome e pixels não entram.
-    expect(suggestProfile({ primaries: "bt2020", transfer: "bt709" }).profile).toBe("unknown");
-    expect(suggestProfile({ primaries: "bt2020", transfer: "log" }).profile).toBe("unknown");
+    expect(suggestProfile({ primaries: "bt2020", transfer: "bt709" })).toEqual({ profile: "apple-log", source: "metadata" });
+    expect(suggestProfile({ primaries: "bt2020", transfer: null }).profile).toBe("apple-log");
+  });
+
+  it("Rec.2020 HDR e Rec.709 não são sugeridos como Apple Log", () => {
+    expect(suggestProfile({ primaries: "bt2020", transfer: "hlg" }).profile).toBe("unknown");
+    expect(suggestProfile({ primaries: "bt2020", transfer: "pq" }).profile).toBe("unknown");
+    expect(suggestProfile({ primaries: "bt709", transfer: "bt709" }).profile).toBe("unknown");
   });
 
   it("escolha manual substitui a sugestão e fica marcada como manual", () => {

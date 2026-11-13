@@ -5,8 +5,8 @@ export type SourceProfile = "apple-log" | "normal" | "unknown";
 
 export type ProfileChoice = {
   profile: SourceProfile;
-  /** "none": nada informou o perfil; "manual": o usuário escolheu. */
-  source: "none" | "manual";
+  /** "none": nada informou o perfil; "metadata": sugerido pelo que o navegador informa; "manual": o usuário escolheu. */
+  source: "none" | "metadata" | "manual";
 };
 
 /** O que o navegador informa sobre o espaço de cor do quadro (VideoFrame.colorSpace). */
@@ -45,11 +45,11 @@ export function planPipeline(profile: SourceProfile, lutExpectsLog: boolean): Pi
   };
 }
 
-// As enumerações de VideoColorSpace (bt709, pq, hlg…) não incluem Apple Log, e o nome ou a
-// aparência do arquivo não são prova. Por isso nenhum dado do navegador sugere Apple Log ou
-// Normal com segurança: a sugestão é sempre "Não sei", e quem escolhe é o usuário.
+// VideoColorSpace não tem um valor "Apple Log", mas o iPhone grava Log com primárias Rec.2020 e
+// transferência que não é HDR (PQ/HLG). Rec.2020 sem HDR é raro fora de Log, então isso vira sugestão;
+// o usuário pode trocar. Nome e aparência do arquivo não entram.
 export function suggestProfile(info: FrameColorInfo | null): ProfileChoice {
-  void info;
+  if (info?.primaries === "bt2020" && !isHdrFrame(info)) return { profile: "apple-log", source: "metadata" };
   return { profile: "unknown", source: "none" };
 }
 

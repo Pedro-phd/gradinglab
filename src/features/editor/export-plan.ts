@@ -1,5 +1,6 @@
 // Plano e verificação de suporte da exportação, sem DOM, WebCodecs nem Mediabunny: as APIs entram injetadas.
 import type { CubeLut } from "./cube-lut";
+import type { LutLayer } from "./lut-state";
 import { isHdrFrame, type SourceProfile } from "./color-pipeline";
 
 /** O que o contêiner diz sobre o vídeo. width/height já são as dimensões exibidas (com a rotação aplicada). */
@@ -32,7 +33,7 @@ export async function countPlayedPackets(packets: AsyncIterable<{ timestamp: num
 }
 
 /** Estado de cor do editor no momento do clique: é o que a prévia usa. */
-export type ExportColor = { profile: SourceProfile; lutExpectsLog: boolean; lut: CubeLut | null; intensity: number };
+export type ExportColor = { profile: SourceProfile; lutExpectsLog: boolean; layers: LutLayer[]; normalizationLut?: CubeLut | null };
 
 export type ExportPlan = {
   container: "mp4";
@@ -49,7 +50,7 @@ export type ExportPlan = {
   tenBit: boolean;
 };
 
-/** O plano sem a cor (que carrega a LUT): é o que a tela mostra. */
+/** O plano sem a cor (que carrega as LUTs): é o que a tela mostra. */
 export type ExportSummary = Omit<ExportPlan, "color">;
 
 export type ExportErrorCode =

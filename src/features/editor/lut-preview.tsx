@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { createLutRenderer, type LutRenderer } from "./lut-renderer";
 import type { CubeLut } from "./cube-lut";
+import type { LutLayer } from "./lut-state";
 import type { FrameColorInfo } from "./color-pipeline";
 import { formatDuration } from "./local-video";
 import { compareView, nextTime, type CompareMode } from "./compare";
@@ -11,14 +12,15 @@ import { CompareOverlay, ModeGroup } from "./compare-overlay";
 type Props = {
   src: string;
   autoPlay: boolean;
-  lut: CubeLut | null;
-  intensity: number; // fração 0..1 do look
-  lutName: string | null;
-  intensityPercent: number; // só para o rótulo "Depois"
+  layers: LutLayer[]; // pilha na ordem de aplicação, com a intensidade de cada uma (0..1)
+  lutName: string | null; // rótulo da pilha: nome da LUT ou "N LUTs"
+  intensityPercent: number | null; // só para o rótulo "Depois"; null quando há várias LUTs
   awaitingProfile: boolean; // perfil não confirmado: o look não é aplicado
   normalizedBase: boolean; // o "antes" é o Apple Log convertido para Rec.709
   normalizedLookInput: boolean; // a LUT recebe a imagem convertida
+  normalizationLut: CubeLut | null; // tabela da Apple que faz a conversão; null enquanto carrega
   onFrameColor: (info: FrameColorInfo | null) => void; // o que o navegador informa sobre o quadro
+  onPausedFrame: (video: HTMLVideoElement | null) => void; // quadro parado para as miniaturas da galeria; null enquanto toca
   unsupported: boolean; // sem WebGL2: vídeo puro, com os controles nativos
   onUnsupported: () => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
@@ -40,7 +42,7 @@ function readFrameColor(video: HTMLVideoElement): FrameColorInfo | null {
 
 // O <video> segue como fonte dos quadros e do áudio, mas quem aparece é o canvas com a LUT.
 // Remontado a cada vídeo (key): ao sair, o efeito cancela o callback de quadros e libera a GPU.
-export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPercent, awaitingProfile, normalizedBase, normalizedLookInput, onFrameColor, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
+export function LutPreview({ src, autoPlay, layers, lutName, intensityPercent, awaitingProfile, normalizedBase, normalizedLookInput, normalizationLut, onFrameColor, onPausedFrame, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<LutRenderer | null>(null);
@@ -73,33 +75,44 @@ export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPe
     };
     loop();
     // Pausado, o callback não dispara: redesenha ao carregar o primeiro quadro e depois de buscar.
+    const reportPaused = () => onPausedFrame(video.paused ? video : null);
     const onLoadedData = () => {
       renderer.draw();
       onFrameColor(readFrameColor(video));
+      reportPaused();
     };
+    const onSeeked = () => {
+      renderer.draw();
+      reportPaused();
+    };
+    const onPlay = () => onPausedFrame(null);
     video.addEventListener("loadeddata", onLoadedData);
-    video.addEventListener("seeked", renderer.draw);
+    video.addEventListener("seeked", onSeeked);
+    video.addEventListener("pause", reportPaused);
+    video.addEventListener("play", onPlay);
 
     return () => {
       if (hasVideoCallback) video.cancelVideoFrameCallback(handle);
       else cancelAnimationFrame(handle);
       video.removeEventListener("loadeddata", onLoadedData);
-      video.removeEventListener("seeked", renderer.draw);
+      video.removeEventListener("seeked", onSeeked);
+      video.removeEventListener("pause", reportPaused);
+      video.removeEventListener("play", onPlay);
+      onPausedFrame(null);
       renderer.dispose();
       rendererRef.current = null;
     };
-  }, [onUnsupported, onFrameColor]);
+  }, [onUnsupported, onFrameColor, onPausedFrame]);
 
   // Muda LUT, intensidade, plano de cor ou divisor: redesenha o quadro atual, também com o vídeo pausado.
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
-    renderer.setLut(lut);
-    renderer.setIntensity(intensity);
+    renderer.setLayers(layers);
     renderer.setCompare(shaderSplit, showOriginal);
-    renderer.setNormalization({ normalizedBase, lookInput: normalizedLookInput });
+    renderer.setNormalization({ normalizedBase, lookInput: normalizedLookInput, lut: normalizationLut });
     renderer.draw();
-  }, [lut, intensity, shaderSplit, showOriginal, normalizedBase, normalizedLookInput]);
+  }, [layers, shaderSplit, showOriginal, normalizedBase, normalizedLookInput, normalizationLut]);
 
   // Lê o vídeo na hora: o updater do setState roda depois e o evento já não vale mais.
   function syncTime(video: HTMLVideoElement) {

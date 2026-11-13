@@ -4,6 +4,7 @@ import drizzle from "eslint-plugin-drizzle";
 import base from "./eslint-rules/next-base.mjs";
 
 export default defineConfig([
+  { ignores: ["public/ffmpeg/**"] }, // ffmpeg.wasm copiado de node_modules
   ...base,
   {
     files: ["src/**/*.{ts,tsx}"],

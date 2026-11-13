@@ -44,3 +44,6 @@ next-env.d.ts
 graphify-out/
 .vercel/
 *.tsbuildinfo
+
+# ffmpeg.wasm copiado de node_modules por scripts/copy-ffmpeg.mjs
+/public/ffmpeg/

@@ -27,3 +27,11 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* Gaveta da galeria de LUTs subindo; só roda com motion-safe. */
+@keyframes sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}

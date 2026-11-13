@@ -1,43 +1,71 @@
 import { describe, expect, it } from "vitest";
 import type { CubeLut } from "./cube-lut";
-import { effectiveIntensity, initialLutState, lutReducer } from "./lut-state";
+import { initialLutState, lutLayers, lutReducer, MAX_STACKED_LUTS, stackLabel, type LutAction, type LutState } from "./lut-state";
 
-const lut: CubeLut = {
-  size: 2,
-  domainMin: [0, 0, 0],
-  domainMax: [1, 1, 1],
-  data: new Float32Array(24),
-};
+const lut = (): CubeLut => ({ size: 2, domainMin: [0, 0, 0], domainMax: [1, 1, 1], data: new Float32Array(24) });
+const run = (...actions: LutAction[]): LutState => actions.reduce(lutReducer, initialLutState);
+const add = (name: string): LutAction => ({ type: "added", lut: lut(), name });
+const names = (state: LutState) => state.stack.map((item) => item.name);
 
-describe("estado da LUT no editor", () => {
-  it("LUT inválida mantém a LUT anterior e expõe a mensagem de erro", () => {
-    const loaded = lutReducer(initialLutState, { type: "loaded", lut, name: "look.cube" });
-    const failed = lutReducer(loaded, { type: "failed", message: "Arquivo inválido." });
-    expect(failed.lut).toBe(lut);
-    expect(failed.name).toBe("look.cube");
-    expect(failed.error?.message).toBe("Arquivo inválido.");
+describe("pilha de LUTs do editor", () => {
+  it("empilha na ordem de importação, cada uma com 100% de intensidade", () => {
+    const state = run(add("conversao.cube"), add("look.cube"));
+    expect(names(state)).toEqual(["conversao.cube", "look.cube"]);
+    expect(state.stack.map((item) => item.intensity)).toEqual([100, 100]);
   });
 
-  it("uma LUT válida limpa o erro anterior", () => {
-    const failed = lutReducer(initialLutState, { type: "failed", message: "Arquivo inválido." });
-    const loaded = lutReducer(failed, { type: "loaded", lut, name: "look.cube" });
-    expect(loaded.error).toBeNull();
+  it("LUT inválida mantém a pilha e expõe a mensagem de erro", () => {
+    const state = run(add("look.cube"), { type: "failed", message: "Arquivo inválido." });
+    expect(names(state)).toEqual(["look.cube"]);
+    expect(state.error?.message).toBe("Arquivo inválido.");
   });
 
   it("repetir o mesmo erro muda o estado, para o aviso ser anunciado de novo", () => {
-    const first = lutReducer(initialLutState, { type: "failed", message: "x" });
+    const first = run({ type: "failed", message: "x" });
     const second = lutReducer(first, { type: "failed", message: "x" });
     expect(second.error?.attempt).not.toBe(first.error?.attempt);
   });
 
-  it("sem LUT carregada, a prévia mostra a base e o controle de intensidade fica desabilitado", () => {
-    expect(initialLutState.lut).toBeNull();
-    expect(effectiveIntensity(initialLutState, 80)).toBe(0);
+  it("recusa passar do limite sem perder as LUTs já empilhadas", () => {
+    const full = run(...Array.from({ length: MAX_STACKED_LUTS }, (_, i) => add(`${i}.cube`)));
+    const state = lutReducer(full, add("extra.cube"));
+    expect(state.stack).toHaveLength(MAX_STACKED_LUTS);
+    expect(state.error).not.toBeNull();
   });
 
-  it("com LUT, a intensidade em % vira fração limitada a 0..1", () => {
-    const loaded = lutReducer(initialLutState, { type: "loaded", lut, name: "look.cube" });
-    expect(effectiveIntensity(loaded, 80)).toBe(0.8);
-    expect(effectiveIntensity(loaded, 250)).toBe(1);
+  it("move, remove e ajusta a intensidade só da LUT indicada", () => {
+    let state = run(add("a.cube"), add("b.cube"), add("c.cube"));
+    const [a, b] = state.stack;
+    state = lutReducer(state, { type: "moved", id: b!.id, offset: -1 });
+    expect(names(state)).toEqual(["b.cube", "a.cube", "c.cube"]);
+    expect(lutReducer(state, { type: "moved", id: b!.id, offset: -1 })).toBe(state); // já é a 1ª
+    state = lutReducer(state, { type: "intensity", id: a!.id, percent: 250 });
+    expect(state.stack.map((item) => item.intensity)).toEqual([100, 100, 100]);
+    state = lutReducer(state, { type: "intensity", id: a!.id, percent: 40 });
+    expect(state.stack.map((item) => item.intensity)).toEqual([100, 40, 100]);
+    state = lutReducer(state, { type: "removed", id: a!.id });
+    expect(names(state)).toEqual(["b.cube", "c.cube"]);
+  });
+
+  it("a marcação de conversão de Log vale só enquanto a mesma LUT está em 1º", () => {
+    const marked = run(add("conversao.cube"), add("look.cube"), { type: "firstExpectsLog", value: true });
+    expect(marked.firstExpectsLog).toBe(true);
+    expect(lutReducer(marked, add("outro.cube")).firstExpectsLog).toBe(true);
+    expect(lutReducer(marked, { type: "moved", id: marked.stack[1]!.id, offset: -1 }).firstExpectsLog).toBe(false);
+    expect(lutReducer(marked, { type: "removed", id: marked.stack[0]!.id }).firstExpectsLog).toBe(false);
+    expect(run({ type: "firstExpectsLog", value: true }).firstExpectsLog).toBe(false); // sem LUT não há o que marcar
+  });
+
+  it("camadas levam a intensidade em fração; sem perfil confirmado nenhuma é aplicada", () => {
+    const state = run(add("a.cube"), add("b.cube"));
+    const withSecondAt = lutReducer(state, { type: "intensity", id: state.stack[1]!.id, percent: 80 });
+    expect(lutLayers(withSecondAt, true).map((layer) => layer.intensity)).toEqual([1, 0.8]);
+    expect(lutLayers(withSecondAt, false).map((layer) => layer.intensity)).toEqual([0, 0]);
+  });
+
+  it("o rótulo mostra o nome com uma LUT e a contagem com várias", () => {
+    expect(stackLabel(initialLutState)).toBeNull();
+    expect(stackLabel(run(add("look.cube")))).toBe("look.cube");
+    expect(stackLabel(run(add("a.cube"), add("b.cube")))).toBe("2 LUTs");
   });
 });
