@@ -4,12 +4,16 @@ import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { createLutRenderer, type LutRenderer } from "./lut-renderer";
 import type { CubeLut } from "./cube-lut";
 import { formatDuration } from "./local-video";
+import { compareView, nextTime, type CompareMode } from "./compare";
+import { CompareOverlay, ModeGroup } from "./compare-overlay";
 
 type Props = {
   src: string;
   autoPlay: boolean;
   lut: CubeLut | null;
   intensity: number; // fração 0..1 do look
+  lutName: string | null;
+  intensityPercent: number; // só para o rótulo "Depois"
   unsupported: boolean; // sem WebGL2: vídeo puro, com os controles nativos
   onUnsupported: () => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
@@ -18,13 +22,18 @@ type Props = {
 
 // O <video> segue como fonte dos quadros e do áudio, mas quem aparece é o canvas com a LUT.
 // Remontado a cada vídeo (key): ao sair, o efeito cancela o callback de quadros e libera a GPU.
-export function LutPreview({ src, autoPlay, lut, intensity, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
+export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPercent, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<LutRenderer | null>(null);
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true); // começa mudo para o autoplay ser aceito
   const [time, setTime] = useState({ current: 0, duration: 0 });
+  const [mode, setMode] = useState<CompareMode>("compare");
+  const [split, setSplit] = useState(0.5);
+  const [aspect, setAspect] = useState(16 / 9); // largura/altura do vídeo, para a caixa da imagem acompanhar o quadro
+  const view = compareView(mode, split, { lutName, intensityPercent });
+  const { split: shaderSplit, showOriginal } = view.uniforms;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -59,14 +68,15 @@ export function LutPreview({ src, autoPlay, lut, intensity, unsupported, onUnsup
     };
   }, [onUnsupported]);
 
-  // Muda LUT ou intensidade: redesenha o quadro atual, também com o vídeo pausado.
+  // Muda LUT, intensidade ou divisor: redesenha o quadro atual, também com o vídeo pausado.
   useEffect(() => {
     const renderer = rendererRef.current;
     if (!renderer) return;
     renderer.setLut(lut);
     renderer.setIntensity(intensity);
+    renderer.setCompare(shaderSplit, showOriginal);
     renderer.draw();
-  }, [lut, intensity]);
+  }, [lut, intensity, shaderSplit, showOriginal]);
 
   // Lê o vídeo na hora: o updater do setState roda depois e o evento já não vale mais.
   function syncTime(video: HTMLVideoElement) {
@@ -87,13 +97,16 @@ export function LutPreview({ src, autoPlay, lut, intensity, unsupported, onUnsup
           Este navegador não oferece WebGL2, necessário para mostrar o look na prévia. O vídeo aparece sem a LUT. Nada é enviado a servidor.
         </p>
       )}
+      {!unsupported && <ModeGroup mode={mode} onChange={setMode} />}
       <div className="relative flex justify-center">
-        <canvas
-          ref={canvasRef}
-          role="img"
-          aria-label="Prévia do vídeo com o look aplicado"
-          className={`max-h-[70vh] w-full rounded-[28px] bg-black object-contain ${unsupported ? "hidden" : ""}`}
-        />
+        {/* A caixa tem a proporção do vídeo (e no máximo 70vh de altura): a fração do divisor vale para a imagem toda. */}
+        <div
+          style={{ aspectRatio: aspect, width: `min(100%, ${70 * aspect}vh)` }}
+          className={`relative overflow-hidden rounded-[28px] bg-black ${unsupported ? "hidden" : ""}`}
+        >
+          <canvas ref={canvasRef} role="img" aria-label="Prévia do vídeo com o look aplicado" className="block h-full w-full" />
+          <CompareOverlay view={view} split={split} onSplit={setSplit} />
+        </div>
         {/* Sem display:none: alguns navegadores deixam de entregar quadros a vídeo oculto. */}
         <video
           ref={videoRef}
@@ -103,6 +116,8 @@ export function LutPreview({ src, autoPlay, lut, intensity, unsupported, onUnsup
           preload="metadata"
           controls={unsupported}
           onLoadedMetadata={(event) => {
+            const { videoWidth, videoHeight } = event.currentTarget;
+            if (videoWidth > 0 && videoHeight > 0) setAspect(videoWidth / videoHeight);
             syncTime(event.currentTarget);
             onLoadedMetadata(event);
           }}
@@ -128,10 +143,17 @@ export function LutPreview({ src, autoPlay, lut, intensity, unsupported, onUnsup
             min={0}
             aria-valuetext={formatDuration(time.current)}
             max={time.duration}
-            step="any"
-            value={time.current}
+            step="any" // arrasto sem perder precisão; as setas andam 1 s (onKeyDown)
+            value={Math.min(time.current, time.duration)}
+            disabled={!(time.duration > 0)}
             onChange={(event) => {
               if (videoRef.current) videoRef.current.currentTime = Number(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              const seconds = nextTime(time.current, event.key, time.duration);
+              if (seconds === null || !videoRef.current) return;
+              event.preventDefault();
+              videoRef.current.currentTime = seconds;
             }}
             className="h-11 min-w-40 flex-1 cursor-pointer accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           />

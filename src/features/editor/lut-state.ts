@@ -1,5 +1,5 @@
 import type { CubeLut } from "./cube-lut";
-import { clampIntensity } from "./lut-math";
+import { clamp01 } from "./lut-math";
 
 export type LutState = {
   lut: CubeLut | null;
@@ -22,5 +22,5 @@ export function lutReducer(state: LutState, action: LutAction): LutState {
 
 /** Intensidade em % (0..100) → fração para o renderizador; sem LUT a prévia é a base. */
 export function effectiveIntensity(state: LutState, percent: number): number {
-  return state.lut ? clampIntensity(percent / 100) : 0;
+  return state.lut ? clamp01(percent / 100) : 0;
 }
