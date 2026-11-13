@@ -2,7 +2,7 @@
 // os testes fixam o contrato aqui.
 import type { CubeLut } from "./cube-lut";
 
-type Rgb = [number, number, number];
+export type Rgb = [number, number, number];
 
 export function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;

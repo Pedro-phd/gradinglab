@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useReducer, useRef, useState, type ChangeEvent, type SyntheticEvent } from "react";
+import { chooseProfile, isHdrFrame, planPipeline, suggestProfile, type FrameColorInfo, type SourceProfile } from "./color-pipeline";
 import { readCubeLutFile } from "./cube-lut";
 import {
   describeDimensions,
@@ -29,9 +30,17 @@ export function VideoPicker() {
   const [lutState, dispatchLut] = useReducer(lutReducer, initialLutState);
   const [intensity, setIntensity] = useState(100);
   const [unsupported, setUnsupported] = useState(false);
+  const [choice, setChoice] = useState(() => suggestProfile(null));
+  const [lutExpectsLog, setLutExpectsLog] = useState(false);
+  const [hdr, setHdr] = useState(false);
   const lutRequest = useRef(0);
   const markUnsupported = useCallback(() => setUnsupported(true), []);
   const url = state.kind === "video" ? state.url : null;
+  const plan = planPipeline(choice.profile, lutExpectsLog);
+  const markFrameColor = useCallback((info: FrameColorInfo | null) => {
+    setChoice((current) => (current.source === "manual" ? current : suggestProfile(info)));
+    setHdr(isHdrFrame(info));
+  }, []);
 
   // A URL local aponta para o arquivo no aparelho; libera ao trocar de vídeo ou sair da tela.
   useEffect(() => {
@@ -58,6 +67,8 @@ export function VideoPicker() {
       return;
     }
     setUnsupported(false);
+    setChoice(suggestProfile(null)); // o perfil é do vídeo: cada arquivo começa sem escolha
+    setHdr(false);
     // Com movimento reduzido a prévia não toca sozinha; os controles continuam visíveis.
     const autoPlay = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     setState({
@@ -73,7 +84,9 @@ export function VideoPicker() {
   function handleLutFile(file: File) {
     const request = ++lutRequest.current;
     void readCubeLutFile(file).then((result) => {
-      if (request === lutRequest.current) dispatchLut(result.ok ? { type: "loaded", lut: result.lut, name: file.name } : { type: "failed", message: result.error.message });
+      if (request !== lutRequest.current) return;
+      if (result.ok) setLutExpectsLog(false); // o aviso "já espera Log" vale para a LUT que o usuário marcou
+      dispatchLut(result.ok ? { type: "loaded", lut: result.lut, name: file.name } : { type: "failed", message: result.error.message });
     });
   }
 
@@ -110,15 +123,24 @@ export function VideoPicker() {
       {state.kind === "video" ? (
         // No celular a intensidade fica logo abaixo do vídeo; no computador, no painel lateral.
         <div className="grid flex-1 content-start gap-4 md:grid-cols-[minmax(0,1fr)_340px] md:grid-rows-[1fr_auto]">
-          <section aria-label="Prévia do vídeo" className="flex min-w-0 items-start justify-center md:items-center">
+          <section aria-label="Prévia do vídeo" className="flex min-w-0 flex-col items-center justify-start gap-3 md:justify-center">
+            {lutState.lut && plan.requiresConfirmation && !unsupported && (
+              <p role="status" className="w-full rounded-2xl bg-amber-500/15 px-4 py-3 text-sm text-amber-200">
+                Confirme a origem do vídeo (Apple Log ou Normal) para aplicar o look. Enquanto isso, a prévia mostra o quadro sem alteração.
+              </p>
+            )}
             <LutPreview
               key={state.url}
               src={state.url}
               autoPlay={state.autoPlay}
               lut={lutState.lut}
-              intensity={effectiveIntensity(lutState, intensity)}
+              intensity={plan.intensityAvailable ? effectiveIntensity(lutState, intensity) : 0}
               lutName={lutState.lut ? lutState.name : null}
               intensityPercent={intensity}
+              awaitingProfile={!plan.applyLook}
+              normalizedBase={plan.normalizedBase}
+              normalizedLookInput={plan.normalize}
+              onFrameColor={markFrameColor}
               unsupported={unsupported}
               onUnsupported={markUnsupported}
               onLoadedMetadata={handleMetadata}
@@ -145,6 +167,12 @@ export function VideoPicker() {
             intensity={intensity}
             onIntensityChange={setIntensity}
             onLutFile={handleLutFile}
+            choice={choice}
+            plan={plan}
+            lutExpectsLog={lutExpectsLog}
+            hdr={hdr}
+            onProfileChange={(profile: SourceProfile) => setChoice(chooseProfile(profile))}
+            onLutExpectsLogChange={setLutExpectsLog}
           />
         </div>
       ) : (

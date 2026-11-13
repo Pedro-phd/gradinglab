@@ -1,7 +1,9 @@
 "use client";
 
 import type { ChangeEvent } from "react";
+import type { PipelinePlan, ProfileChoice, SourceProfile } from "./color-pipeline";
 import type { LutState } from "./lut-state";
+import { SourceProfileSection } from "./source-profile";
 
 const panel = "rounded-[28px] border border-white/10 bg-white/[.07] backdrop-blur-xl";
 const pill =
@@ -13,10 +15,16 @@ type Props = {
   intensity: number; // percentual 0..100
   onIntensityChange: (percent: number) => void;
   onLutFile: (file: File) => void;
+  choice: ProfileChoice;
+  plan: PipelinePlan;
+  lutExpectsLog: boolean;
+  hdr: boolean;
+  onProfileChange: (profile: SourceProfile) => void;
+  onLutExpectsLogChange: (expectsLog: boolean) => void;
 };
 
-export function LookPanel({ state, unsupported, intensity, onIntensityChange, onLutFile }: Props) {
-  const enabled = state.lut !== null && !unsupported;
+export function LookPanel({ state, unsupported, intensity, onIntensityChange, onLutFile, choice, plan, lutExpectsLog, hdr, onProfileChange, onLutExpectsLogChange }: Props) {
+  const enabled = state.lut !== null && !unsupported && plan.intensityAvailable;
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = ""; // permite escolher o mesmo arquivo de novo
@@ -25,6 +33,8 @@ export function LookPanel({ state, unsupported, intensity, onIntensityChange, on
 
   return (
     <aside aria-label="Ajustes de cor" className={`${panel} order-2 flex flex-col gap-5 p-5 md:order-none md:col-start-2 md:row-span-2 md:row-start-1 md:self-start`}>
+      <SourceProfileSection choice={choice} plan={plan} lutExpectsLog={lutExpectsLog} hdr={hdr} disabled={unsupported} onChoose={onProfileChange} />
+
       <section aria-labelledby="look-titulo" className="flex flex-col gap-3">
         <h2 id="look-titulo" className="font-display text-[15px] font-semibold">Look</h2>
         {state.error && (
@@ -45,6 +55,17 @@ export function LookPanel({ state, unsupported, intensity, onIntensityChange, on
             className={`${pill} peer-disabled:cursor-not-allowed peer-disabled:opacity-40 ${state.lut ? "border border-white/20 hover:bg-white/10" : "bg-accent text-accent-ink hover:brightness-110"}`}
           >{state.lut ? "Trocar" : "Importar LUT"}</label>
         </div>
+        <label className="flex min-h-11 cursor-pointer items-center gap-3 text-[13px] leading-snug text-foreground/80 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-40">
+          <input
+            type="checkbox"
+            checked={lutExpectsLog}
+            disabled={!state.lut || unsupported}
+            onChange={(event) => onLutExpectsLogChange(event.target.checked)}
+            className="size-5 shrink-0 accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          />
+          <span>Esta LUT já espera Log (normaliza e aplica o look de uma vez)</span>
+        </label>
+        {plan.warning && <p role="status" className="rounded-2xl bg-amber-500/15 px-3 py-2 text-xs text-amber-200">{plan.warning.message}</p>}
       </section>
 
       <section aria-labelledby="intensidade-titulo" className="flex flex-col gap-1">
@@ -69,7 +90,7 @@ export function LookPanel({ state, unsupported, intensity, onIntensityChange, on
           <span>0% · sem look</span>
           <span>100% · look integral</span>
         </div>
-        {!enabled && <p className="text-xs text-muted">{unsupported ? "Indisponível sem WebGL2." : "Importe uma LUT para ajustar a intensidade."}</p>}
+        {!enabled && <p className="text-xs text-muted">{unsupported ? "Indisponível sem WebGL2." : !state.lut ? "Importe uma LUT para ajustar a intensidade." : "Confirme a origem do vídeo para ajustar a intensidade."}</p>}
       </section>
     </aside>
   );

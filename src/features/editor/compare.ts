@@ -38,19 +38,20 @@ export type CompareView = {
 export function compareView(
   mode: CompareMode,
   split: number,
-  look: { lutName: string | null; intensityPercent: number },
+  look: { lutName: string | null; intensityPercent: number; normalizedBase?: boolean; awaitingProfile?: boolean },
 ): CompareView {
   const percent = Math.round(look.intensityPercent);
-  const after = look.lutName ? `Depois · ${look.lutName} · ${percent}%` : "Depois · nenhuma LUT";
-  const afterShort = look.lutName ? `Depois · ${percent}%` : "Depois";
+  // Sem perfil confirmado o look não é aplicado: o rótulo não pode prometer LUT nem intensidade.
+  const after = look.awaitingProfile ? "Depois · aguardando perfil" : look.lutName ? `Depois · ${look.lutName} · ${percent}%` : "Depois · nenhuma LUT";
+  const afterShort = look.lutName && !look.awaitingProfile ? `Depois · ${percent}%` : "Depois";
   if (mode === "original") {
-    // Até a normalização de Log existir, "original" e "antes" são a mesma imagem; o modo já tem o rótulo certo.
+    // "Original" é o quadro como veio, sem a conversão de Log que já está em "antes".
     return { uniforms: { split: 1, showOriginal: true }, handleVisible: false, leftLabel: ORIGINAL_LABEL, rightLabel: null, leftShort: "Original", rightShort: null };
   }
   if (mode === "result") {
     return { uniforms: { split: 0, showOriginal: false }, handleVisible: false, leftLabel: null, rightLabel: after, leftShort: null, rightShort: afterShort };
   }
-  return { uniforms: { split: clamp01(split), showOriginal: false }, handleVisible: true, leftLabel: "Antes · sem look", rightLabel: after, leftShort: "Antes", rightShort: afterShort };
+  return { uniforms: { split: clamp01(split), showOriginal: false }, handleVisible: true, leftLabel: look.normalizedBase ? "Antes · Rec.709, sem look" : "Antes · sem look", rightLabel: after, leftShort: "Antes", rightShort: afterShort };
 }
 
 /** Segundos da barra de tempo após a tecla (seta = 1 s); null quando a tecla não navega ou a duração é desconhecida. */
