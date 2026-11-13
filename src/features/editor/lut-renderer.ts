@@ -140,7 +140,10 @@ export function createLutRenderer(
     gl.useProgram(program);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, frameTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+    // Sem conversão do navegador: ela mudaria as primárias antes da matriz do shader.
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    // RGBA16F: a curva Log roda sobre ponto flutuante, não sobre 8 bits.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, video);
     gl.uniform1i(uniforms.uFrame, 0);
     gl.uniform1i(uniforms.uLut, 1);
     gl.uniform3fv(uniforms.uDomainMin, table.domainMin);

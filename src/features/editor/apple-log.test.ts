@@ -7,6 +7,7 @@ import {
   linearToRec709,
   multiply,
   normalizeAppleLog,
+  OETF_BREAK,
   primariesToXyz,
   REC2020,
   REC2020_TO_REC709,
@@ -76,8 +77,9 @@ describe("codificação Rec.709", () => {
   it("mapeia 0 em 0 e 1 em 1 e é contínua entre o trecho linear e o de potência", () => {
     expect(linearToRec709(0)).toBe(0);
     expect(linearToRec709(1)).toBeCloseTo(1, 12);
-    const knee = 0.018053968510807; // quebra implícita em gamma 2,2222 e offset 0,099 (GammaOpUtils.cpp)
-    expect(Math.abs(linearToRec709(knee - 1e-9) - linearToRec709(knee + 1e-9))).toBeLessThan(1e-8);
+    // Quebra implícita em gamma 2,2222 e offset 0,099 (GammaOpUtils.cpp): os dois trechos se encontram nela.
+    const eps = 1e-11;
+    expect(Math.abs(linearToRec709(OETF_BREAK - eps) - linearToRec709(OETF_BREAK + eps))).toBeLessThan(1e-9);
   });
 });
 

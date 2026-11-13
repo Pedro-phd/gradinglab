@@ -137,6 +137,7 @@ export function VideoPicker() {
               intensity={plan.intensityAvailable ? effectiveIntensity(lutState, intensity) : 0}
               lutName={lutState.lut ? lutState.name : null}
               intensityPercent={intensity}
+              awaitingProfile={!plan.applyLook}
               normalizedBase={plan.normalizedBase}
               normalizedLookInput={plan.normalize}
               onFrameColor={markFrameColor}

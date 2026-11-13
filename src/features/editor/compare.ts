@@ -38,11 +38,12 @@ export type CompareView = {
 export function compareView(
   mode: CompareMode,
   split: number,
-  look: { lutName: string | null; intensityPercent: number; normalizedBase?: boolean },
+  look: { lutName: string | null; intensityPercent: number; normalizedBase?: boolean; awaitingProfile?: boolean },
 ): CompareView {
   const percent = Math.round(look.intensityPercent);
-  const after = look.lutName ? `Depois · ${look.lutName} · ${percent}%` : "Depois · nenhuma LUT";
-  const afterShort = look.lutName ? `Depois · ${percent}%` : "Depois";
+  // Sem perfil confirmado o look não é aplicado: o rótulo não pode prometer LUT nem intensidade.
+  const after = look.awaitingProfile ? "Depois · aguardando perfil" : look.lutName ? `Depois · ${look.lutName} · ${percent}%` : "Depois · nenhuma LUT";
+  const afterShort = look.lutName && !look.awaitingProfile ? `Depois · ${percent}%` : "Depois";
   if (mode === "original") {
     // "Original" é o quadro como veio, sem a conversão de Log que já está em "antes".
     return { uniforms: { split: 1, showOriginal: true }, handleVisible: false, leftLabel: ORIGINAL_LABEL, rightLabel: null, leftShort: "Original", rightShort: null };

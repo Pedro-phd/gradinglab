@@ -31,7 +31,7 @@ const PT = APPLE_LOG.c * (APPLE_LOG.rt - APPLE_LOG.r0) ** 2;
 
 const OETF_GAMMA = 2.22222222222222;
 const OETF_OFFSET = 0.099;
-const OETF_BREAK = ((OETF_OFFSET * OETF_GAMMA) / ((OETF_GAMMA - 1) * (1 + OETF_OFFSET))) ** OETF_GAMMA;
+export const OETF_BREAK = ((OETF_OFFSET * OETF_GAMMA) / ((OETF_GAMMA - 1) * (1 + OETF_OFFSET))) ** OETF_GAMMA;
 const OETF_SLOPE = ((OETF_GAMMA - 1) / OETF_OFFSET) ** (OETF_GAMMA - 1) * ((1 + OETF_OFFSET) / OETF_GAMMA) ** OETF_GAMMA;
 
 export function apply(m: Matrix3, v: Rgb): Rgb {

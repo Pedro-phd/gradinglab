@@ -15,6 +15,7 @@ type Props = {
   intensity: number; // fração 0..1 do look
   lutName: string | null;
   intensityPercent: number; // só para o rótulo "Depois"
+  awaitingProfile: boolean; // perfil não confirmado: o look não é aplicado
   normalizedBase: boolean; // o "antes" é o Apple Log convertido para Rec.709
   normalizedLookInput: boolean; // a LUT recebe a imagem convertida
   onFrameColor: (info: FrameColorInfo | null) => void; // o que o navegador informa sobre o quadro
@@ -39,7 +40,7 @@ function readFrameColor(video: HTMLVideoElement): FrameColorInfo | null {
 
 // O <video> segue como fonte dos quadros e do áudio, mas quem aparece é o canvas com a LUT.
 // Remontado a cada vídeo (key): ao sair, o efeito cancela o callback de quadros e libera a GPU.
-export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPercent, normalizedBase, normalizedLookInput, onFrameColor, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
+export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPercent, awaitingProfile, normalizedBase, normalizedLookInput, onFrameColor, unsupported, onUnsupported, onLoadedMetadata, onVideoError }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<LutRenderer | null>(null);
@@ -49,7 +50,7 @@ export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPe
   const [mode, setMode] = useState<CompareMode>("compare");
   const [split, setSplit] = useState(0.5);
   const [aspect, setAspect] = useState(16 / 9); // largura/altura do vídeo, para a caixa da imagem acompanhar o quadro
-  const view = compareView(mode, split, { lutName, intensityPercent, normalizedBase });
+  const view = compareView(mode, split, { lutName, intensityPercent, normalizedBase, awaitingProfile });
   const { split: shaderSplit, showOriginal } = view.uniforms;
 
   useEffect(() => {

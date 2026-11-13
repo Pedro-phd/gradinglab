@@ -64,6 +64,12 @@ describe("modo de comparação", () => {
     expect(compareView("original", 0.5, { ...lutLabel, normalizedBase: true }).leftLabel).toBe("Original · sem conversão");
   });
 
+  it("sem perfil confirmado, o rótulo 'depois' não cita LUT nem intensidade", () => {
+    const view = compareView("compare", 0.5, { ...lutLabel, awaitingProfile: true });
+    expect(view.rightLabel).toBe("Depois · aguardando perfil");
+    expect(view.rightShort).toBe("Depois");
+  });
+
   it("rótulos identificam cada lado", () => {
     const view = compareView("compare", 0.5, lutLabel);
     expect(view.leftLabel).toBe("Antes · sem look");

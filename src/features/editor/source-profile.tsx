@@ -12,7 +12,7 @@ function describe(profile: SourceProfile, lutExpectsLog: boolean): string {
   if (profile === "apple-log") {
     return lutExpectsLog
       ? "Apple Log: a LUT recebe o Log sem conversão. O “antes” e a base da intensidade continuam sendo a imagem convertida para Rec.709."
-      : "Apple Log é convertido para Rec.709 antes do look. Essa imagem normalizada é o “antes”.";
+      : "Apple Log é convertido para Rec.709 antes do look. Essa imagem normalizada é o “antes”. Áreas muito claras acima do branco do Rec.709 ficam brancas.";
   }
   if (profile === "normal") return "Gravação normal: nenhuma conversão de Log é aplicada antes do look.";
   return "Perfil não confirmado. Escolha Apple Log ou Normal para aplicar o look com a base correta.";
@@ -32,7 +32,7 @@ export function SourceProfileSection({ choice, plan, lutExpectsLog, hdr, disable
     <section aria-labelledby="origem-titulo" className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between gap-2">
         <h2 id="origem-titulo" className="font-display text-[15px] font-semibold">Origem do vídeo</h2>
-        <span className="text-xs text-muted">{choice.source === "manual" ? "escolhido por você" : "o navegador não informou"}</span>
+        <span className="text-xs text-muted">{choice.source === "none" ? "o navegador não informou" : choice.profile === "unknown" ? "perfil não confirmado" : "escolhido por você"}</span>
       </div>
       <div role="group" aria-label="Perfil de cor da origem" className="flex gap-1 rounded-full bg-black/30 p-1">
         {OPTIONS.map(({ profile, label }) => (
