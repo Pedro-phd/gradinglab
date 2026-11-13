@@ -26,6 +26,7 @@ export function ExportProgress({ state, summary, onCancel }: Props) {
         <div role="progressbar" aria-label="Progresso da exportação" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} className="h-2.5 overflow-hidden rounded-full bg-white/15">
           <div style={{ width: `${percent}%` }} className="h-full rounded-full bg-accent" />
         </div>
+        <p className="text-[13px] tabular-nums text-muted">{plan ? `Quadro ${state.framesDone} de ${plan.totalFrames}` : (state.stage ?? "Iniciando…")}</p>
         <ul className="flex flex-col gap-3 text-sm leading-snug text-foreground/90">
           <li>Processando neste aparelho. Nada é enviado.</li>
           <li>{plan?.audio === "none" ? "Duração, proporção e orientação preservadas. O vídeo não tem áudio." : "Duração, áudio, proporção e orientação preservados."}</li>

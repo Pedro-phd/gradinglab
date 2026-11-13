@@ -7,6 +7,8 @@ export type ExportState = {
   status: "idle" | "preparing" | "encoding" | "finalizing" | "done" | "cancelled" | "failed";
   plan: ExportSummary | null;
   framesDone: number;
+  /** Etapa da preparação, para a tela dizer onde está (e onde parou, se parar). */
+  stage: string | null;
   /** Só existe em "done": cancelar ou falhar nunca deixa arquivo. */
   output: ExportOutput | null;
   error: ExportError | null;
@@ -14,6 +16,7 @@ export type ExportState = {
 
 export type ExportAction =
   | { type: "start" }
+  | { type: "stage"; stage: string }
   | { type: "prepared"; plan: ExportSummary }
   | { type: "progress"; done: number }
   | { type: "finalizing" }
@@ -22,7 +25,7 @@ export type ExportAction =
   | { type: "fail"; error: ExportError }
   | { type: "reset" };
 
-export const idleExport: ExportState = { status: "idle", plan: null, framesDone: 0, output: null, error: null };
+export const idleExport: ExportState = { status: "idle", plan: null, framesDone: 0, stage: null, output: null, error: null };
 
 const ACTIVE: ExportState["status"][] = ["preparing", "encoding", "finalizing"];
 
@@ -31,6 +34,8 @@ export function exportReducer(state: ExportState, action: ExportAction): ExportS
   switch (action.type) {
     case "start":
       return ACTIVE.includes(status) ? state : { ...idleExport, status: "preparing" };
+    case "stage":
+      return status === "preparing" ? { ...state, stage: action.stage } : state;
     case "prepared":
       return status === "preparing" ? { ...state, status: "encoding", plan: action.plan } : state;
     case "progress":

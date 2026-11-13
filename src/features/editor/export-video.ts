@@ -3,7 +3,7 @@
 // ou na thread principal. A mídia nunca sai do aparelho e o arquivo de origem só é lido.
 import { BlobSource, BufferTarget, canEncodeVideo, Conversion, ConversionCanceledError, EncodedPacketSink, Input, MP4, Mp4OutputFormat, Output, QTFF, Quality, StreamTarget, type InputVideoTrack } from "mediabunny";
 import { planPipeline } from "./color-pipeline";
-import { checkSupport, countPlayedPackets, exportError, planExport, rotatedSize, type ExportColor, type ExportErrorCode, type ExportSource } from "./export-plan";
+import { checkSupport, countPlayedPackets, exportError, planExport, rotatedSize, type ExportColor, type ExportErrorCode, type ExportSource, withTimeout } from "./export-plan";
 import type { ExportAction } from "./export-state";
 import { createLutRenderer, type RenderCanvas } from "./lut-renderer";
 
@@ -21,6 +21,7 @@ class ExportFailure extends Error {
 }
 
 const PROGRESS_INTERVAL_MS = 100;
+const STORAGE_TIMEOUT_MS = 5000;
 const QUALITY = new Quality("very-high"); // o mesmo valor vai ao codificador e à verificação de suporte
 
 // Cancelar ou falhar nunca deixa o temporário: quem grava é este código, então é ele quem apaga (antes de avisar a tela).
@@ -62,10 +63,12 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, emi
   let started = false; // depois de execute() o Mediabunny é dono do writable
   const onAbort = () => void (canceling ??= conversion ? conversion.cancel().catch(() => undefined) : null);
   try {
+    emit({ type: "stage", stage: "Lendo o vídeo…" });
     const track = await input.getPrimaryVideoTrack().catch(() => null);
     if (!track) throw new ExportFailure("container_unsupported");
     const plan = planExport(await readSource(input, track), request.color);
     const { color, ...summary } = plan;
+    emit({ type: "stage", stage: "Verificando o suporte do aparelho…" });
     const unsupported = await checkSupport({
       webCodecs: typeof VideoEncoder !== "undefined" && typeof VideoDecoder !== "undefined",
       canDecode: () => track.canDecode(),
@@ -74,6 +77,7 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, emi
     if (unsupported) throw new ExportFailure(unsupported.code);
 
     // O mesmo plano de cor da prévia. Sem divisor nem modo de comparação: sai sempre o "depois".
+    emit({ type: "stage", stage: "Preparando o look…" });
     const canvas = createCanvas();
     renderer = createLutRenderer(canvas, null, () => undefined);
     if (!renderer) throw new ExportFailure("webgl_unavailable");
@@ -82,7 +86,9 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, emi
     renderer.setNormalization({ normalizedBase: colorPlan.normalizedBase, lookInput: colorPlan.normalize, lut: color.normalizationLut });
 
     // Em disco, quando o navegador deixa; senão fica na memória (a tela avisa quando o original é grande).
-    writable = request.handle && "createWritable" in request.handle ? await request.handle.createWritable() : null;
+    // Com limite de tempo: se o armazenamento não responder, a saída fica na memória em vez de travar em 0%.
+    emit({ type: "stage", stage: "Abrindo o arquivo de saída…" });
+    writable = request.handle && "createWritable" in request.handle ? await withTimeout(request.handle.createWritable(), STORAGE_TIMEOUT_MS) : null;
     const target = writable ? new StreamTarget(writable as WritableStream<never>, { chunked: true }) : new BufferTarget();
     output = new Output({ format: new Mp4OutputFormat(), target });
 
@@ -131,6 +137,7 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, emi
     if (done < plan.totalFrames) throw new ExportFailure("incomplete_output");
     if (!finalizing) emit({ type: "finalizing" });
     const blob = target instanceof BufferTarget ? new Blob([target.buffer ?? new ArrayBuffer(0)], { type: "video/mp4" }) : await request.handle!.getFile();
+    if (target instanceof BufferTarget) await discardTemp(request.handle); // temporário aberto mas não usado
     emit({ type: "finished", framesWritten: done, output: { blob } });
   } catch (error) {
     // Ordem: parar a conversão e esperar o Mediabunny fechar o arquivo, apagar o temporário e só então avisar a tela.

@@ -137,6 +137,11 @@ export function exportFileName(videoName: string, lutName: string | null): strin
   return `${base(videoName)}-${lutName ? base(lutName) : "com-look"}.mp4`;
 }
 
+/** null quando a promessa não responde a tempo: o armazenamento local de alguns navegadores trava sem erro. */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+}
+
 const MEMORY_WARNING_BYTES = 1024 ** 3;
 
 /** Sem gravação incremental em disco, a saída inteira fica na memória: avisa quando o original já é grande. */

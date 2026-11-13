@@ -2,7 +2,7 @@
 
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { ExportRequest } from "./export-video";
-import { exportError, type ExportColor } from "./export-plan";
+import { exportError, withTimeout, type ExportColor } from "./export-plan";
 import { exportReducer, idleExport, type ExportAction } from "./export-state";
 
 const STALE_MS = 24 * 60 * 60 * 1000;
@@ -14,6 +14,10 @@ export function hasIncrementalStorage(): boolean {
 
 async function openTempFile(): Promise<{ handle: FileSystemFileHandle; remove: () => void } | null> {
   if (!hasIncrementalStorage()) return null;
+  return withTimeout(openTempFileUnsafe(), 5000);
+}
+
+async function openTempFileUnsafe(): Promise<{ handle: FileSystemFileHandle; remove: () => void } | null> {
   try {
     const dir = await navigator.storage.getDirectory();
     // Sobras de abas fechadas no meio da exportação: o nome traz a hora de criação.
@@ -88,7 +92,10 @@ export function useExport() {
       mine.worker?.terminate();
       if (!keep) mine.temp?.remove(); // runExport já apagou; aqui só cobre worker que caiu
     };
-    async function launch(inWorker: boolean) {
+    // Qualquer falha ao iniciar (worker, cópia do pedido) vira erro na tela, nunca um 0% parado.
+    const launch = (inWorker: boolean) => launchUnsafe(inWorker).catch(() => emit({ type: "fail", error: exportError("export_failed") }));
+    async function launchUnsafe(inWorker: boolean) {
+      dispatch({ type: "stage", stage: "Abrindo o armazenamento local…" });
       mine.temp = await openTempFile();
       if (mine.controller.signal.aborted) {
         mine.temp?.remove();
