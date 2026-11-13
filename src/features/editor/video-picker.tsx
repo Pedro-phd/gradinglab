@@ -12,8 +12,8 @@ type Metadata = { duration: number; width: number; height: number };
 
 type State =
   | { kind: "empty" }
-  | { kind: "error"; message: string }
-  | { kind: "video"; name: string; url: string; metadata: Metadata | null };
+  | { kind: "error"; message: string; attempt: number }
+  | { kind: "video"; name: string; url: string; autoPlay: boolean; metadata: Metadata | null };
 
 const panel = "rounded-[28px] border border-white/10 bg-white/[.07] backdrop-blur-xl";
 const pill =
@@ -29,16 +29,33 @@ export function VideoPicker() {
     return () => URL.revokeObjectURL(url);
   }, [url]);
 
+  // O contador remonta o aviso, para o leitor de tela repetir a mesma mensagem.
+  function showError(message: string) {
+    setState((current) => ({
+      kind: "error",
+      message,
+      attempt: current.kind === "error" ? current.attempt + 1 : 1,
+    }));
+  }
+
   function handleChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = ""; // permite escolher o mesmo arquivo de novo
     if (!file) return;
     const result = validateVideoFile(file);
     if (!result.ok) {
-      setState({ kind: "error", message: result.error.message });
+      showError(result.error.message);
       return;
     }
-    setState({ kind: "video", name: file.name, url: URL.createObjectURL(file), metadata: null });
+    // Com movimento reduzido a prévia não toca sozinha; os controles continuam visíveis.
+    const autoPlay = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    setState({
+      kind: "video",
+      name: file.name,
+      url: URL.createObjectURL(file),
+      autoPlay,
+      metadata: null,
+    });
   }
 
   function handleMetadata(event: SyntheticEvent<HTMLVideoElement>) {
@@ -51,7 +68,7 @@ export function VideoPicker() {
   }
 
   function handleVideoError(event: SyntheticEvent<HTMLVideoElement>) {
-    setState({ kind: "error", message: describeVideoError(event.currentTarget.error?.code) });
+    showError(describeVideoError(event.currentTarget.error?.code));
   }
 
   const label = (text: string, className: string) => (
@@ -73,11 +90,13 @@ export function VideoPicker() {
 
       {state.kind === "video" ? (
         <>
-          <section aria-label="Prévia do vídeo" className="flex flex-1 items-center justify-center">
+          <section aria-label="Prévia do vídeo" className="flex flex-1 items-start justify-center md:items-center">
             <video
               key={state.url}
               src={state.url}
               controls
+              autoPlay={state.autoPlay}
+              muted
               playsInline
               preload="metadata"
               onLoadedMetadata={handleMetadata}
@@ -109,7 +128,7 @@ export function VideoPicker() {
             Escolha um vídeo do seu aparelho
           </h2>
           {state.kind === "error" && (
-            <p role="alert" className="rounded-2xl bg-red-500/15 px-4 py-3 text-sm text-red-200">
+            <p key={state.attempt} role="alert" className="rounded-2xl bg-red-500/15 px-4 py-3 text-sm text-red-200">
               {state.message}
             </p>
           )}
