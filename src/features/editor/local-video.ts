@@ -17,7 +17,8 @@ export function validateVideoFile(file: Pick<File, "type" | "size">): VideoFileR
       error: { code: "empty_file", message: "O arquivo está vazio. Escolha outro vídeo." },
     };
   }
-  if (!file.type.startsWith("video/")) {
+  // Tipo vazio = extensão que o sistema não conhece; deixa o <video> decidir pelo evento error.
+  if (file.type !== "" && !file.type.startsWith("video/")) {
     return {
       ok: false,
       error: {

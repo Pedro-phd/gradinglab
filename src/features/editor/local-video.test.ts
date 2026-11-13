@@ -22,6 +22,10 @@ describe("validação do arquivo de vídeo", () => {
     if (!result.ok) expect(result.error.code).toBe("not_video");
   });
 
+  it("tenta abrir arquivo sem tipo informado e deixa o navegador decidir", () => {
+    expect(validateVideoFile(fileOf("")).ok).toBe(true);
+  });
+
   it("rejeita arquivo vazio", () => {
     const result = validateVideoFile(fileOf("video/mp4", ""));
     expect(result.ok).toBe(false);
