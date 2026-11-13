@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CubeLut } from "./cube-lut";
-import { clampIntensity, lutTexture, mixIntensity, normalizeInput } from "./lut-math";
+import { clamp01, lutTexture, mixIntensity, normalizeInput } from "./lut-math";
 
 describe("mistura de intensidade", () => {
   const base: [number, number, number] = [0.2, 0.4, 0.6];
@@ -22,8 +22,8 @@ describe("mistura de intensidade", () => {
   });
 
   it("limita a intensidade a 0..1", () => {
-    expect(clampIntensity(-0.5)).toBe(0);
-    expect(clampIntensity(1.7)).toBe(1);
+    expect(clamp01(-0.5)).toBe(0);
+    expect(clamp01(1.7)).toBe(1);
     expect(mixIntensity(base, look, 1.7)).toEqual(look);
   });
 });

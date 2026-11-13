@@ -1,6 +1,6 @@
 // WebGL2: cada quadro do <video> vira textura 2D e o shader aplica a LUT 3D. Sem readPixels, sem rede.
 import type { CubeLut } from "./cube-lut";
-import { clampIntensity, lutTexture } from "./lut-math";
+import { clamp01, lutTexture } from "./lut-math";
 
 export type LutRenderer = {
   setLut(lut: CubeLut | null): void;
@@ -40,9 +40,10 @@ vec3 applyLook(vec3 base) {
 }
 
 void main() {
-  vec3 base = texture(uFrame, vUv).rgb; // card 5: normalizar o perfil/Log aqui, antes da LUT
-  bool before = uShowOriginal || vUv.x < uSplit; // mesmo quadro nos dois lados do divisor
-  outColor = vec4(before ? base : mix(base, applyLook(base), uIntensity), 1.0);
+  vec3 raw = texture(uFrame, vUv).rgb; // quadro como veio do vídeo: é o que "Original" mostra
+  vec3 base = raw; // card 5: normalizar o perfil/Log aqui; é a única linha a trocar
+  // Mesmo quadro nos dois lados do divisor: esquerda = base, direita = base com o look.
+  outColor = vec4(uShowOriginal ? raw : (vUv.x < uSplit ? base : mix(base, applyLook(base), uIntensity)), 1.0);
 }`;
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
@@ -167,9 +168,9 @@ export function createLutRenderer(
       table = next ? lutTexture(next) : noLut;
       if (!lost) uploadLut();
     },
-    setIntensity: (next) => void (intensity = clampIntensity(next)),
+    setIntensity: (next) => void (intensity = clamp01(next)),
     setCompare(nextSplit, nextShowOriginal) {
-      split = clampIntensity(nextSplit);
+      split = clamp01(nextSplit);
       showOriginal = nextShowOriginal;
     },
     draw,

@@ -4,10 +4,8 @@ import { useEffect, useRef, useState, type SyntheticEvent } from "react";
 import { createLutRenderer, type LutRenderer } from "./lut-renderer";
 import type { CubeLut } from "./cube-lut";
 import { formatDuration } from "./local-video";
-import { compareView, timeFromFraction, type CompareMode } from "./compare";
+import { compareView, nextTime, type CompareMode } from "./compare";
 import { CompareOverlay, ModeGroup } from "./compare-overlay";
-
-const TIME_STEPS = 1000; // resolução da barra de tempo: 0,1% da duração
 
 type Props = {
   src: string;
@@ -144,13 +142,18 @@ export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPe
             aria-label="Posição no vídeo"
             min={0}
             aria-valuetext={formatDuration(time.current)}
-            max={TIME_STEPS}
-            step={1}
-            value={time.duration > 0 ? Math.round((time.current / time.duration) * TIME_STEPS) : 0}
+            max={time.duration}
+            step="any" // arrasto sem perder precisão; as setas andam 1 s (onKeyDown)
+            value={Math.min(time.current, time.duration)}
             disabled={!(time.duration > 0)}
             onChange={(event) => {
-              const seconds = timeFromFraction(Number(event.target.value) / TIME_STEPS, time.duration);
-              if (videoRef.current && seconds !== null) videoRef.current.currentTime = seconds;
+              if (videoRef.current) videoRef.current.currentTime = Number(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              const seconds = nextTime(time.current, event.key, time.duration);
+              if (seconds === null || !videoRef.current) return;
+              event.preventDefault();
+              videoRef.current.currentTime = seconds;
             }}
             className="h-11 min-w-40 flex-1 cursor-pointer accent-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
           />

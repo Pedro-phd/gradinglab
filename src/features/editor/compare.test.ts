@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareView, nextSplit, splitFromPointer, timeFromFraction } from "./compare";
+import { compareView, nextSplit, splitFromPointer, nextTime } from "./compare";
 
 const lutLabel = { lutName: "Entardecer_Quente.cube", intensityPercent: 80 };
 
@@ -20,6 +20,10 @@ describe("posição do divisor", () => {
   it("teclado move o divisor em passos fixos", () => {
     expect(nextSplit(0.5, "ArrowRight")).toBe(0.52);
     expect(nextSplit(0.5, "ArrowLeft")).toBe(0.48);
+    expect(nextSplit(0.5, "ArrowUp")).toBe(0.52);
+    expect(nextSplit(0.5, "ArrowDown")).toBe(0.48);
+    expect(nextSplit(0.5, "PageUp")).toBe(0.6);
+    expect(nextSplit(0.5, "PageDown")).toBe(0.4);
     expect(nextSplit(0.5, "Home")).toBe(0);
     expect(nextSplit(0.5, "End")).toBe(1);
   });
@@ -27,6 +31,8 @@ describe("posição do divisor", () => {
   it("o passo do teclado para nas bordas e ignora outras teclas", () => {
     expect(nextSplit(0.99, "ArrowRight")).toBe(1);
     expect(nextSplit(0.01, "ArrowLeft")).toBe(0);
+    expect(nextSplit(0.95, "PageUp")).toBe(1);
+    expect(nextSplit(0.05, "PageDown")).toBe(0);
     expect(nextSplit(0.5, "a")).toBeNull();
   });
 });
@@ -60,6 +66,12 @@ describe("modo de comparação", () => {
     expect(view.rightLabel).toContain("80%");
   });
 
+  it("versões curtas dos rótulos cabem em tela estreita", () => {
+    const view = compareView("compare", 0.5, lutLabel);
+    expect(view.leftShort).toBe("Antes");
+    expect(view.rightShort).toBe("Depois · 80%");
+  });
+
   it("'só o resultado' mostra só o rótulo do depois", () => {
     const view = compareView("result", 0.5, lutLabel);
     expect(view.leftLabel).toBeNull();
@@ -73,15 +85,17 @@ describe("modo de comparação", () => {
 });
 
 describe("tempo", () => {
-  it("converte a posição na barra de tempo em segundos, limitada à duração", () => {
-    expect(timeFromFraction(1 / 3, 42)).toBeCloseTo(14);
-    expect(timeFromFraction(2, 42)).toBe(42);
-    expect(timeFromFraction(-1, 42)).toBe(0);
+  it("setas andam 1 s na barra de tempo, limitadas à duração", () => {
+    expect(nextTime(10, "ArrowRight", 42)).toBe(11);
+    expect(nextTime(10, "ArrowDown", 42)).toBe(9);
+    expect(nextTime(41.5, "ArrowUp", 42)).toBe(42);
+    expect(nextTime(0.4, "ArrowLeft", 42)).toBe(0);
   });
 
-  it("não navega quando a duração é desconhecida", () => {
-    expect(timeFromFraction(0.5, Number.NaN)).toBeNull();
-    expect(timeFromFraction(0.5, Number.POSITIVE_INFINITY)).toBeNull();
-    expect(timeFromFraction(0.5, 0)).toBeNull();
+  it("não navega com outra tecla nem com duração desconhecida", () => {
+    expect(nextTime(10, "a", 42)).toBeNull();
+    expect(nextTime(10, "ArrowRight", Number.NaN)).toBeNull();
+    expect(nextTime(10, "ArrowRight", Number.POSITIVE_INFINITY)).toBeNull();
+    expect(nextTime(10, "ArrowRight", 0)).toBeNull();
   });
 });

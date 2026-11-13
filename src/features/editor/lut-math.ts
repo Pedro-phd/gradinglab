@@ -4,13 +4,13 @@ import type { CubeLut } from "./cube-lut";
 
 type Rgb = [number, number, number];
 
-export function clampIntensity(value: number): number {
+export function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
 }
 
 /** base·(1−t) + look·t: em t=0 e t=1 devolve exatamente base e look. */
 export function mixIntensity(base: Rgb, look: Rgb, intensity: number): Rgb {
-  const t = clampIntensity(intensity);
+  const t = clamp01(intensity);
   return [base[0] * (1 - t) + look[0] * t, base[1] * (1 - t) + look[1] * t, base[2] * (1 - t) + look[2] * t];
 }
 
