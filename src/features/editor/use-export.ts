@@ -28,68 +28,94 @@ async function openTempFile(): Promise<{ handle: FileSystemFileHandle; remove: (
   }
 }
 
+type TempFile = { handle: FileSystemFileHandle; remove: () => void };
+type Job = { controller: AbortController; worker: Worker | null; temp: TempFile | null; active: boolean; cancelled: boolean; retried: boolean };
+
 export function useExport() {
   const [state, dispatch] = useReducer(exportReducer, idleExport);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const urlRef = useRef<string | null>(null);
-  const job = useRef<{ cancel: () => void; cleanup: () => void } | null>(null);
+  const job = useRef<Job | null>(null);
 
+  // Libera a URL e o temporário de uma exportação terminada. Uma ainda ativa (cancelando) se limpa sozinha ao confirmar.
   function release() {
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     urlRef.current = null;
     setDownloadUrl(null);
-    job.current?.cleanup();
+    if (job.current && !job.current.active) job.current.temp?.remove();
     job.current = null;
+  }
+  function cancelJob(mine: Job) {
+    if (!mine.active || mine.cancelled) return;
+    mine.cancelled = true;
+    dispatch({ type: "cancel" }); // a tela volta na hora; o temporário só some quando o worker confirma
+    mine.controller.abort();
+    mine.worker?.postMessage("cancel");
   }
   // Sair da tela durante a exportação também a interrompe; a URL local é liberada.
   useEffect(() => () => {
-    job.current?.cancel();
-    job.current?.cleanup();
+    if (job.current?.active) cancelJob(job.current);
+    else job.current?.temp?.remove();
     if (urlRef.current) URL.revokeObjectURL(urlRef.current);
   }, []);
 
   async function start(file: File, color: ExportColor) {
     release();
     dispatch({ type: "start" });
-    const temp = await openTempFile();
-    const request: ExportRequest = { file, color, handle: temp?.handle ?? null };
-    const controller = new AbortController();
-    let worker: Worker | null = null;
+    // O job e o AbortController existem antes de qualquer await: cancelar na fase inicial já vale.
+    const mine: Job = { controller: new AbortController(), worker: null, temp: null, active: true, cancelled: false, retried: false };
+    job.current = mine;
     const emit = (action: ExportAction) => {
-      dispatch(action);
-      if (action.type === "finished") {
-        urlRef.current = URL.createObjectURL(action.output.blob);
-        setDownloadUrl(urlRef.current);
+      // Sem WebGL2 no worker: tenta uma vez na thread principal (o worker já apagou o temporário).
+      if (action.type === "fail" && action.error.code === "webgl_unavailable" && mine.worker && !mine.retried && !mine.cancelled) {
+        mine.retried = true;
+        mine.worker.terminate();
+        mine.worker = null;
+        void launch(false);
+        return;
       }
-      if (action.type === "finished" || action.type === "fail" || action.type === "cancel") worker?.terminate();
-      if (action.type === "fail" || action.type === "cancel") temp?.remove();
+      // Sucesso só com a exportação ainda valendo; cancelada no último instante, nada de URL nem de arquivo.
+      const keep = action.type === "finished" && job.current === mine && !mine.cancelled;
+      if (job.current === mine && (keep || action.type !== "finished")) {
+        if (action.type === "finished") {
+          urlRef.current = URL.createObjectURL(action.output.blob);
+          setDownloadUrl(urlRef.current);
+        }
+        dispatch(action);
+      }
+      if (action.type !== "finished" && action.type !== "fail" && action.type !== "cancel") return;
+      mine.active = false;
+      mine.worker?.terminate();
+      if (!keep) mine.temp?.remove(); // runExport já apagou; aqui só cobre worker que caiu
     };
-    job.current = {
-      // A tela volta na hora; o worker confirma com "cancel" depois de fechar tudo e descartar os dados parciais.
-      cancel: () => {
-        dispatch({ type: "cancel" });
-        if (worker) worker.postMessage("cancel");
-        else controller.abort();
-      },
-      cleanup: () => temp?.remove(),
-    };
-    if (typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
-      worker = new Worker(new URL("./export-worker.ts", import.meta.url), { type: "module" });
-      worker.onmessage = (event: MessageEvent<ExportAction>) => emit(event.data);
-      worker.onerror = () => emit({ type: "fail", error: exportError("export_failed") });
-      worker.postMessage(request);
-    } else {
-      // Sem Worker ou OffscreenCanvas: a mesma exportação na thread principal.
-      const { runExport } = await import("./export-video");
-      void runExport(request, controller.signal, emit);
+    async function launch(inWorker: boolean) {
+      mine.temp = await openTempFile();
+      if (mine.controller.signal.aborted) {
+        mine.temp?.remove();
+        mine.active = false;
+        return;
+      }
+      const request: ExportRequest = { file, color, handle: mine.temp?.handle ?? null };
+      if (inWorker && typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
+        const worker = new Worker(new URL("./export-worker.ts", import.meta.url), { type: "module" });
+        mine.worker = worker;
+        worker.onmessage = (event: MessageEvent<ExportAction>) => emit(event.data);
+        worker.onerror = () => emit({ type: "fail", error: exportError("export_failed") });
+        worker.postMessage(request);
+      } else {
+        // Sem Worker ou OffscreenCanvas (ou depois de o worker não achar WebGL2): a mesma exportação na thread principal.
+        const { runExport } = await import("./export-video");
+        void runExport(request, mine.controller.signal, emit);
+      }
     }
+    await launch(true);
   }
 
   return {
     state,
     downloadUrl,
     start,
-    cancel: () => job.current?.cancel(),
+    cancel: () => job.current && cancelJob(job.current),
     reset: () => {
       release();
       dispatch({ type: "reset" });
