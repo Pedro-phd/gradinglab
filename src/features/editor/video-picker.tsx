@@ -117,6 +117,8 @@ export function VideoPicker() {
               autoPlay={state.autoPlay}
               lut={lutState.lut}
               intensity={effectiveIntensity(lutState, intensity)}
+              lutName={lutState.lut ? lutState.name : null}
+              intensityPercent={intensity}
               unsupported={unsupported}
               onUnsupported={markUnsupported}
               onLoadedMetadata={handleMetadata}
