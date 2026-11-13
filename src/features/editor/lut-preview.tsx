@@ -49,7 +49,7 @@ export function LutPreview({ src, autoPlay, lut, intensity, lutName, intensityPe
   const [mode, setMode] = useState<CompareMode>("compare");
   const [split, setSplit] = useState(0.5);
   const [aspect, setAspect] = useState(16 / 9); // largura/altura do vídeo, para a caixa da imagem acompanhar o quadro
-  const view = compareView(mode, split, { lutName, intensityPercent });
+  const view = compareView(mode, split, { lutName, intensityPercent, normalizedBase });
   const { split: shaderSplit, showOriginal } = view.uniforms;
 
   useEffect(() => {

@@ -59,6 +59,11 @@ describe("modo de comparação", () => {
     expect(view.rightLabel).toBeNull();
   });
 
+  it("com Apple Log convertido, o rótulo de 'antes' diz que a base está em Rec.709 e 'original' continua sem conversão", () => {
+    expect(compareView("compare", 0.5, { ...lutLabel, normalizedBase: true }).leftLabel).toBe("Antes · Rec.709, sem look");
+    expect(compareView("original", 0.5, { ...lutLabel, normalizedBase: true }).leftLabel).toBe("Original · sem conversão");
+  });
+
   it("rótulos identificam cada lado", () => {
     const view = compareView("compare", 0.5, lutLabel);
     expect(view.leftLabel).toBe("Antes · sem look");
