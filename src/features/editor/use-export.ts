@@ -12,12 +12,12 @@ export function hasIncrementalStorage(): boolean {
   return typeof FileSystemFileHandle !== "undefined" && "createWritable" in FileSystemFileHandle.prototype && typeof navigator.storage?.getDirectory === "function";
 }
 
-async function openTempFile(): Promise<{ handle: FileSystemFileHandle; remove: () => void } | null> {
+async function openTempFile(): Promise<TempFile | null> {
   if (!hasIncrementalStorage()) return null;
   return withTimeout(openTempFileUnsafe(), 5000);
 }
 
-async function openTempFileUnsafe(): Promise<{ handle: FileSystemFileHandle; remove: () => void } | null> {
+async function openTempFileUnsafe(): Promise<TempFile | null> {
   try {
     const dir = await navigator.storage.getDirectory();
     // Sobras de abas fechadas no meio da exportação: o nome traz a hora de criação.
@@ -25,14 +25,14 @@ async function openTempFileUnsafe(): Promise<{ handle: FileSystemFileHandle; rem
       if (/^export-(\d+)-/.test(key) && Date.now() - Number(key.split("-")[1]) > STALE_MS) await dir.removeEntry(key).catch(() => undefined);
     }
     const name = `export-${Date.now()}-${crypto.randomUUID()}.mp4`;
-    const handle = await dir.getFileHandle(name, { create: true });
-    return { handle, remove: () => void dir.removeEntry(name).catch(() => undefined) };
+    await dir.getFileHandle(name, { create: true });
+    return { name, remove: () => void dir.removeEntry(name).catch(() => undefined) };
   } catch {
     return null;
   }
 }
 
-type TempFile = { handle: FileSystemFileHandle; remove: () => void };
+type TempFile = { name: string; remove: () => void };
 type Job = { controller: AbortController; worker: Worker | null; temp: TempFile | null; active: boolean; cancelled: boolean; retried: boolean };
 
 export function useExport() {
@@ -102,7 +102,7 @@ export function useExport() {
         mine.active = false;
         return;
       }
-      const request: ExportRequest = { file, color, handle: mine.temp?.handle ?? null };
+      const request: ExportRequest = { file, color, tempName: mine.temp?.name ?? null };
       if (inWorker && typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
         const worker = new Worker(new URL("./export-worker.ts", import.meta.url), { type: "module" });
         mine.worker = worker;

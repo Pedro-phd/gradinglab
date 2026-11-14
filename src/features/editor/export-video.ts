@@ -11,7 +11,8 @@ export type ExportRequest = {
   file: File;
   color: ExportColor;
   /** Arquivo temporário na raiz do armazenamento local do navegador (OPFS), para gravar sem manter tudo na memória. */
-  handle: FileSystemFileHandle | null;
+  // Só o nome: o Safari não deixa enviar o FileSystemFileHandle ao worker (DataCloneError); quem exporta abre o arquivo.
+  tempName: string | null;
 };
 
 class ExportFailure extends Error {
@@ -25,10 +26,10 @@ const STORAGE_TIMEOUT_MS = 5000;
 const QUALITY = new Quality("very-high"); // o mesmo valor vai ao codificador e à verificação de suporte
 
 // Cancelar ou falhar nunca deixa o temporário: quem grava é este código, então é ele quem apaga (antes de avisar a tela).
-async function discardTemp(handle: FileSystemFileHandle | null) {
-  if (!handle) return;
+async function discardTemp(name: string | null) {
+  if (!name) return;
   try {
-    await (await navigator.storage.getDirectory()).removeEntry(handle.name);
+    await (await navigator.storage.getDirectory()).removeEntry(name);
   } catch {
     // já removido ou nunca criado
   }
@@ -62,6 +63,7 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, sen
   };
   const input = new Input({ source: new BlobSource(request.file), formats: [MP4, QTFF] });
   let renderer: ReturnType<typeof createLutRenderer> = null;
+  let handle: FileSystemFileHandle | null = null;
   let writable: WritableStream | null = null;
   let output: Output | null = null;
   let conversion: Conversion | null = null;
@@ -94,7 +96,9 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, sen
     // Em disco, quando o navegador deixa; senão fica na memória (a tela avisa quando o original é grande).
     // Com limite de tempo: se o armazenamento não responder, a saída fica na memória em vez de travar em 0%.
     emit({ type: "stage", stage: "Abrindo o arquivo de saída…" });
-    writable = request.handle && "createWritable" in request.handle ? await withTimeout(request.handle.createWritable(), STORAGE_TIMEOUT_MS) : null;
+    const tempName = request.tempName;
+    handle = tempName ? await withTimeout(navigator.storage.getDirectory().then((dir) => dir.getFileHandle(tempName)).catch(() => null), STORAGE_TIMEOUT_MS) : null;
+    writable = handle && "createWritable" in handle ? await withTimeout(handle.createWritable(), STORAGE_TIMEOUT_MS) : null;
     const target = writable ? new StreamTarget(writable as WritableStream<never>, { chunked: true }) : new BufferTarget();
     output = new Output({ format: new Mp4OutputFormat(), target });
 
@@ -142,8 +146,8 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, sen
     // Menos quadros que o esperado nunca vira sucesso: falha aqui, antes de existir arquivo para baixar.
     if (done < plan.totalFrames) throw new ExportFailure("incomplete_output");
     if (!finalizing) emit({ type: "finalizing" });
-    const blob = target instanceof BufferTarget ? new Blob([target.buffer ?? new ArrayBuffer(0)], { type: "video/mp4" }) : await request.handle!.getFile();
-    if (target instanceof BufferTarget) await discardTemp(request.handle); // temporário aberto mas não usado
+    const blob = target instanceof BufferTarget ? new Blob([target.buffer ?? new ArrayBuffer(0)], { type: "video/mp4" }) : await handle!.getFile();
+    if (target instanceof BufferTarget) await discardTemp(request.tempName); // temporário aberto mas não usado
     emit({ type: "finished", framesWritten: done, output: { blob } });
   } catch (error) {
     // Ordem: parar a conversão e esperar o Mediabunny fechar o arquivo, apagar o temporário e só então avisar a tela.
@@ -151,7 +155,7 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, sen
     await (canceling ?? conversion?.cancel())?.catch(() => undefined);
     await output?.cancel().catch(() => undefined);
     if (!started) await writable?.abort().catch(() => undefined);
-    await discardTemp(request.handle);
+    await discardTemp(request.tempName);
     if (error instanceof ConversionCanceledError || signal.aborted) emit({ type: "cancel" });
     else if (error instanceof ExportFailure) emit({ type: "fail", error: exportError(error.code) });
     else emit({ type: "fail", error: exportError("export_failed", `${stage} — ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`) });
