@@ -20,7 +20,7 @@ export type ThumbnailInput = {
 };
 
 /**
- * Miniatura = quadro pausado → pilha atual → LUT candidata a 100%, pelo MESMO renderizador da prévia.
+ * Miniatura = quadro pausado → pilha atual sem a LUT de cima → LUT candidata a 100%, pelo MESMO renderizador da prévia.
  * Um canvas WebGL fora da tela desenha em resolução cheia e um canvas 2D reduz para JPEG.
  * Uma miniatura por quadro de tela, para não travar a interface.
  */
@@ -47,8 +47,9 @@ export function useLookThumbnails({ video, frameVersion, base, normalization, ca
     const context = small.getContext("2d");
     if (!context) return;
     context.imageSmoothingQuality = "high"; // o padrão ("low") serrilha ao reduzir de 1080p/4K
-    // Mesmo limite da pilha: a candidata ocupa a última posição.
-    const kept = base.slice(0, MAX_STACKED_LUTS - 1);
+    // A candidata TROCA a LUT de cima, como o toque na faixa de looks: sem isso a miniatura mostraria
+    // a candidata por cima do look atual. Mesmo limite da pilha: a candidata ocupa a última posição.
+    const kept = base.slice(0, -1).slice(0, MAX_STACKED_LUTS - 1);
     let index = 0;
     let handle = 0;
     const step = () => {
