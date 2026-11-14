@@ -73,6 +73,19 @@ export function appleLogToLinear(p: number): number {
   return r0;
 }
 
+/** Luz linear de cena → código Apple Log; inverso de appleLogToLinear dentro da faixa da curva. */
+export function linearToAppleLog(x: number): number {
+  const { r0, rt, c, beta, gamma, delta } = APPLE_LOG;
+  if (x >= rt) return gamma * Math.log2(x + beta) + delta;
+  if (x >= r0) return c * (x - r0) ** 2;
+  return 0;
+}
+
+/** Código Rec.709 → luz linear; inverso de linearToRec709. */
+export function rec709ToLinear(v: number): number {
+  return v < OETF_SLOPE * OETF_BREAK ? v / OETF_SLOPE : ((v + OETF_OFFSET) / (1 + OETF_OFFSET)) ** OETF_GAMMA;
+}
+
 /** Luz linear (0..1) → código Rec.709. */
 export function linearToRec709(x: number): number {
   return x < OETF_BREAK ? OETF_SLOPE * x : (1 + OETF_OFFSET) * x ** (1 / OETF_GAMMA) - OETF_OFFSET;
@@ -82,6 +95,21 @@ export function linearToRec709(x: number): number {
 export function normalizeAppleLog(rgb: Rgb): Rgb {
   const linear = apply(REC2020_TO_REC709, rgb.map(appleLogToLinear) as Rgb);
   return linear.map((value) => linearToRec709(Math.min(1, Math.max(0, value)))) as Rgb;
+}
+
+// Altas luzes suaves (opção): acima deste valor de luz linear Rec.709 a curva passa a comprimir até 1,
+// em vez de cortar. Abaixo dele a conversão é idêntica à normal (cinza médio, pele e sombras não mudam).
+export const SOFT_KNEE = 0.6;
+
+/** Ombro exponencial: contínuo e com a mesma inclinação no joelho; tende a 1 sem chegar. */
+export function softShoulder(x: number): number {
+  return x <= SOFT_KNEE ? x : SOFT_KNEE + (1 - SOFT_KNEE) * (1 - Math.exp(-(x - SOFT_KNEE) / (1 - SOFT_KNEE)));
+}
+
+/** Como normalizeAppleLog, mas a luz acima de 1 (céu, lâmpadas) é comprimida em vez de cortada. */
+export function normalizeAppleLogSoft(rgb: Rgb): Rgb {
+  const linear = apply(REC2020_TO_REC709, rgb.map(appleLogToLinear) as Rgb);
+  return linear.map((value) => linearToRec709(softShoulder(Math.max(0, value)))) as Rgb;
 }
 
 const glsl = (value: number) => (Number.isInteger(value) ? value.toFixed(1) : String(value));
@@ -99,8 +127,28 @@ float linearToRec709(float x) {
   return x < ${glsl(OETF_BREAK)} ? ${glsl(OETF_SLOPE)} * x : ${glsl(1 + OETF_OFFSET)} * pow(x, ${glsl(1 / OETF_GAMMA)}) - ${glsl(OETF_OFFSET)};
 }
 
+// Inversos, para os ajustes em luz linear (effects-glsl.ts): mesmas fórmulas de linearToAppleLog e rec709ToLinear.
+float linearToAppleLog(float x) {
+  if (x >= ${glsl(APPLE_LOG.rt)}) return ${glsl(APPLE_LOG.gamma)} * log2(x + ${glsl(APPLE_LOG.beta)}) + ${glsl(APPLE_LOG.delta)};
+  if (x >= ${glsl(APPLE_LOG.r0)}) return ${glsl(APPLE_LOG.c)} * (x - (${glsl(APPLE_LOG.r0)})) * (x - (${glsl(APPLE_LOG.r0)}));
+  return 0.0;
+}
+
+float rec709ToLinear(float v) {
+  return v < ${glsl(OETF_SLOPE * OETF_BREAK)} ? v / ${glsl(OETF_SLOPE)} : pow((v + ${glsl(OETF_OFFSET)}) / ${glsl(1 + OETF_OFFSET)}, ${glsl(OETF_GAMMA)});
+}
+
 vec3 normalizeAppleLog(vec3 p) {
   vec3 linear = vec3(appleLogToLinear(p.r), appleLogToLinear(p.g), appleLogToLinear(p.b));
   vec3 rec709 = clamp(mat3(${matrixColumns.map(glsl).join(", ")}) * linear, 0.0, 1.0);
   return vec3(linearToRec709(rec709.r), linearToRec709(rec709.g), linearToRec709(rec709.b));
+}
+
+float softShoulder(float x) {
+  return x <= ${glsl(SOFT_KNEE)} ? x : ${glsl(SOFT_KNEE)} + ${glsl(1 - SOFT_KNEE)} * (1.0 - exp(-(x - ${glsl(SOFT_KNEE)}) / ${glsl(1 - SOFT_KNEE)}));
+}
+
+vec3 normalizeAppleLogSoft(vec3 p) {
+  vec3 linear = max(mat3(${matrixColumns.map(glsl).join(", ")}) * vec3(appleLogToLinear(p.r), appleLogToLinear(p.g), appleLogToLinear(p.b)), 0.0);
+  return vec3(linearToRec709(softShoulder(linear.r)), linearToRec709(softShoulder(linear.g)), linearToRec709(softShoulder(linear.b)));
 }`;

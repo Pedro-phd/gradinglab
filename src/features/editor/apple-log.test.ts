@@ -4,11 +4,16 @@ import {
   apply,
   APPLE_LOG,
   invert,
+  linearToAppleLog,
   linearToRec709,
   multiply,
   normalizeAppleLog,
+  normalizeAppleLogSoft,
   OETF_BREAK,
   primariesToXyz,
+  rec709ToLinear,
+  SOFT_KNEE,
+  softShoulder,
   REC2020,
   REC2020_TO_REC709,
   type Matrix3,
@@ -99,6 +104,51 @@ describe("conversão Apple Log → Rec.709", () => {
         expect(value).toBeGreaterThanOrEqual(0);
         expect(value).toBeLessThanOrEqual(1);
       });
+    }
+  });
+});
+
+// Os ajustes em luz linear (effects-glsl.ts) vão e voltam por estas curvas: sem ajuste, a imagem não pode mudar.
+describe("curvas inversas", () => {
+  it("linearToAppleLog desfaz appleLogToLinear nos dois trechos da curva", () => {
+    for (const code of [0, 0.05, 0.1, APPLE_LOG.c * (APPLE_LOG.rt - APPLE_LOG.r0) ** 2, 0.3, 0.5, 0.7, 0.9, 1]) {
+      // As constantes publicadas não emendam exatamente na quebra (~3e-9): tolerância do OCIO.
+      expect(Math.abs(linearToAppleLog(appleLogToLinear(code)) - code)).toBeLessThan(OCIO_TOLERANCE);
+    }
+  });
+
+  it("rec709ToLinear desfaz linearToRec709, inclusive no trecho reto perto do preto", () => {
+    for (const light of [0, OETF_BREAK / 2, OETF_BREAK, 0.18, 0.5, 1]) {
+      expect(rec709ToLinear(linearToRec709(light))).toBeCloseTo(light, 9);
+    }
+  });
+});
+
+describe("altas luzes suaves", () => {
+  it("abaixo do joelho é a mesma conversão: sombras, pele e cinza médio não mudam", () => {
+    for (const code of [0.1, 0.3, 0.45, 0.55]) {
+      const rgb: Rgb = [code, code * 0.95, code * 0.9];
+      expectClose(normalizeAppleLogSoft(rgb), normalizeAppleLog(rgb), 1e-12);
+    }
+  });
+
+  it("onde a conversão normal corta em 1, a suave ainda separa os tons", () => {
+    const sky = normalizeAppleLogSoft([0.8, 0.8, 0.8])[0];
+    const sun = normalizeAppleLogSoft([1, 1, 1])[0];
+    expect(normalizeAppleLog([0.8, 0.8, 0.8])[0]).toBe(1);
+    expect(sky).toBeLessThan(sun);
+    expect(sun).toBeLessThan(1);
+  });
+
+  it("o ombro é contínuo, crescente e nunca passa de 1", () => {
+    expect(softShoulder(SOFT_KNEE)).toBe(SOFT_KNEE);
+    expect(softShoulder(SOFT_KNEE + 1e-9) - SOFT_KNEE).toBeCloseTo(1e-9, 12); // mesma inclinação no joelho
+    let previous = 0;
+    for (let x = 0; x <= 20; x += 0.25) {
+      const y = softShoulder(x);
+      expect(y).toBeGreaterThanOrEqual(previous);
+      expect(y).toBeLessThanOrEqual(1);
+      previous = y;
     }
   });
 });

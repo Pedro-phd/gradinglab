@@ -6,6 +6,8 @@ import type { CubeLut } from "./cube-lut";
 import { describeDimensions, describeVideoError, formatDuration, validateVideoFile } from "./local-video";
 import { ConversionCancelled, convertToH264 } from "./convert-video";
 import type { CompareMode } from "./compare";
+import { AdjustStrip } from "./adjust-strip";
+import { hasEffects, NEUTRAL_EFFECTS, setEffect } from "./effects";
 import { ExportControl } from "./export-screen";
 import { ConvertingScreen, HomeScreen } from "./home-screen";
 import { LookStrip, ToolBar, type Tool } from "./look-strip";
@@ -47,8 +49,14 @@ export function VideoPicker() {
   const singlePercent = lutState.stack.length === 1 ? lutState.stack[0]!.intensity : null;
 
   const library = useLutLibrary();
-  // Ferramenta aberta: "looks" é a faixa fixa; as outras abrem um painel por cima. A galeria abre a partir da pilha.
+  // Ferramenta aberta: "looks" e "ajustes" são faixas fixas; as outras abrem um painel por cima e, ao fechar,
+  // voltam à última faixa. A galeria abre a partir da pilha.
   const [tool, setTool] = useState<Tool>("looks");
+  const [strip, setStrip] = useState<"looks" | "ajustes">("looks");
+  const [effects, setEffects] = useState(NEUTRAL_EFFECTS);
+  const [softHighlights, setSoftHighlights] = useState(false); // só vale com Apple Log (a conversão é dele)
+  // Como o look, os ajustes esperam a origem confirmada: dependem da base certa.
+  const appliedEffects = plan.applyLook ? effects : NEUTRAL_EFFECTS;
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mode, setMode] = useState<CompareMode>("compare");
   const snapshot = useRef<(() => Snapshot | null) | null>(null);
@@ -65,7 +73,7 @@ export function VideoPicker() {
       active = false;
     };
   }, [needsAppleLut]);
-  const normalization = useMemo(() => ({ normalizedBase: plan.normalizedBase, lookInput: plan.normalize, lut: appleLut }), [plan.normalizedBase, plan.normalize, appleLut]);
+  const normalization = useMemo(() => ({ normalizedBase: plan.normalizedBase, lookInput: plan.normalize, lut: appleLut, softHighlights }), [plan.normalizedBase, plan.normalize, appleLut, softHighlights]);
   const candidates = useMemo(() => library.folders.flatMap((folder) => folder.items.flatMap((item) => (item.lut ? [{ id: item.id, lut: item.lut }] : []))), [library.folders]);
   const thumbs = useLookThumbnails({ video: pausedFrame.video, frameVersion: pausedFrame.version, base: layers, normalization, candidates, enabled: !unsupported && plan.applyLook });
   const thumbStatus = unsupported ? "Indisponível sem WebGL2." : !plan.applyLook ? "Confirme a origem do vídeo para gerar as miniaturas." : null;
@@ -173,16 +181,28 @@ export function VideoPicker() {
   }
 
   const webCodecs = typeof VideoEncoder !== "undefined" && typeof VideoDecoder !== "undefined";
-  const blocked = unsupported ? "Indisponível sem WebGL2." : !webCodecs ? "Este navegador não tem WebCodecs para exportar." : lutState.stack.length === 0 ? "Adicione uma LUT para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null;
+  const blocked = unsupported ? "Indisponível sem WebGL2." : !webCodecs ? "Este navegador não tem WebCodecs para exportar." : lutState.stack.length === 0 && !hasEffects(effects) ? "Adicione uma LUT ou um ajuste para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null;
   const enabled = !unsupported && plan.intensityAvailable;
   const disabledReason = unsupported ? "Indisponível sem WebGL2." : !plan.intensityAvailable ? "Confirme a origem do vídeo para ajustar as intensidades." : null;
-  const closeTool = () => setTool("looks");
+  const closeTool = () => setTool(strip);
+  function selectTool(next: Tool) {
+    setTool(next);
+    if (next === "looks" || next === "ajustes") setStrip(next);
+  }
 
   function closeVideo() {
     conversion.current?.abort();
-    setTool("looks");
+    selectTool("looks");
     setState({ kind: "empty" });
   }
+
+  // Aviso acima da faixa (looks ou ajustes) enquanto a origem não foi confirmada.
+  const notice =
+    (lutState.stack.length > 0 || hasEffects(effects)) && plan.requiresConfirmation && !unsupported ? (
+      <button type="button" onClick={() => setTool("origem")} className={`mx-5 rounded-2xl bg-amber-500/15 px-4 py-3 text-left text-[13px] text-amber-200 ${focus}`}>
+        Confirme a origem do vídeo (Apple Log ou Normal) para aplicar o look. Toque para escolher.
+      </button>
+    ) : null;
 
   return (
     <main className="group flex flex-1 flex-col">
@@ -205,7 +225,7 @@ export function VideoPicker() {
               key={state.url}
               file={state.file}
               lutName={active?.name ?? null}
-              color={{ profile: choice.profile, lutExpectsLog, layers, normalizationLut: appleLut }}
+              color={{ profile: choice.profile, lutExpectsLog, layers, normalizationLut: appleLut, softHighlights, effects: appliedEffects }}
               blocked={blocked}
               snapshot={() => snapshot.current?.() ?? null}
             />
@@ -223,6 +243,8 @@ export function VideoPicker() {
               normalizedBase={plan.normalizedBase}
               normalizedLookInput={plan.normalize}
               normalizationLut={appleLut}
+              softHighlights={softHighlights}
+              effects={appliedEffects}
               onFrameColor={markFrameColor}
               onPausedFrame={markPausedFrame}
               unsupported={unsupported}
@@ -235,22 +257,20 @@ export function VideoPicker() {
           </section>
 
           <div className="flex shrink-0 flex-col md:justify-end md:border-l md:border-white/10">
-            <LookStrip
-              folders={library.folders}
-              thumbs={thumbs}
-              active={active && { name: active.name, intensity: active.intensity }}
-              enabled={enabled}
-              onPick={pickFromStrip}
-              onIntensity={(percent) => active && dispatchLut({ type: "intensity", id: active.id, percent })}
-              notice={
-                lutState.stack.length > 0 && plan.requiresConfirmation && !unsupported ? (
-                  <button type="button" onClick={() => setTool("origem")} className={`mx-5 rounded-2xl bg-amber-500/15 px-4 py-3 text-left text-[13px] text-amber-200 ${focus}`}>
-                    Confirme a origem do vídeo (Apple Log ou Normal) para aplicar o look. Toque para escolher.
-                  </button>
-                ) : null
-              }
-            />
-            <ToolBar current={tool} onSelect={setTool} />
+            {strip === "ajustes" ? (
+              <AdjustStrip effects={effects} enabled={enabled} notice={notice} onChange={(key, value) => setEffects((current) => setEffect(current, key, value))} onReset={() => setEffects(NEUTRAL_EFFECTS)} />
+            ) : (
+              <LookStrip
+                folders={library.folders}
+                thumbs={thumbs}
+                active={active && { name: active.name, intensity: active.intensity }}
+                enabled={enabled}
+                onPick={pickFromStrip}
+                onIntensity={(percent) => active && dispatchLut({ type: "intensity", id: active.id, percent })}
+                notice={notice}
+              />
+            )}
+            <ToolBar current={tool} onSelect={selectTool} />
           </div>
 
           <StackSheet open={tool === "pilha"} onClose={closeTool} state={lutState} dispatch={dispatchLut} enabled={enabled} disabledReason={disabledReason} plan={plan} thumbFor={thumbFor} onAdd={openGallery} />
@@ -263,6 +283,8 @@ export function VideoPicker() {
             hdr={hdr}
             disabled={unsupported}
             onChoose={(profile: SourceProfile) => setChoice(chooseProfile(profile))}
+            softHighlights={softHighlights}
+            onSoftHighlights={setSoftHighlights}
             video={{
               name: state.name,
               details: state.metadata

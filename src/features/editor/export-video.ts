@@ -91,7 +91,8 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, sen
     if (!renderer) throw new ExportFailure("webgl_unavailable");
     const colorPlan = planPipeline(color.profile, color.lutExpectsLog);
     renderer.setLayers(color.layers);
-    renderer.setNormalization({ normalizedBase: colorPlan.normalizedBase, lookInput: colorPlan.normalize, lut: color.normalizationLut });
+    renderer.setNormalization({ normalizedBase: colorPlan.normalizedBase, lookInput: colorPlan.normalize, lut: color.normalizationLut, softHighlights: color.softHighlights });
+    if (color.effects) renderer.setEffects(color.effects);
 
     // Em disco, quando o navegador deixa; senão fica na memória (a tela avisa quando o original é grande).
     // Com limite de tempo: se o armazenamento não responder, a saída fica na memória em vez de travar em 0%.

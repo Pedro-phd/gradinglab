@@ -36,11 +36,13 @@ type OriginProps = {
   hdr: boolean; // o navegador indicou HDR no quadro
   disabled: boolean;
   onChoose: (profile: SourceProfile) => void;
+  softHighlights: boolean;
+  onSoftHighlights: (on: boolean) => void;
   video: { name: string; details: string };
   onPickAnother: () => void;
 };
 
-export function OriginSheet({ open, onClose, choice, plan, lutExpectsLog, hdr, disabled, onChoose, video, onPickAnother }: OriginProps) {
+export function OriginSheet({ open, onClose, choice, plan, lutExpectsLog, hdr, disabled, onChoose, softHighlights, onSoftHighlights, video, onPickAnother }: OriginProps) {
   const source = choice.source === "none" ? "o navegador não informou" : choice.source === "metadata" ? "detectado no arquivo" : choice.profile === "unknown" ? "perfil não confirmado" : "escolhido por você";
   return (
     <Sheet open={open} onClose={onClose} title="Origem do vídeo" titleId="origem-titulo" action={<SheetDone onClick={onClose} />}>
@@ -62,6 +64,19 @@ export function OriginSheet({ open, onClose, choice, plan, lutExpectsLog, hdr, d
         </div>
         <p className="px-1 text-[13px] leading-[18px] text-foreground/80">{describe(choice.profile, lutExpectsLog)}</p>
         {plan.requiresConfirmation && <p role="status" className="px-1 text-xs text-muted">O look só é aplicado depois que você confirmar o perfil.</p>}
+        {choice.profile === "apple-log" && (
+          <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="text-[15px] font-semibold">Altas luzes suaves</span>
+              <span className="text-[13px] leading-[18px] text-muted">Céu e lâmpadas perdem o brilho aos poucos, como no filme, em vez de virar branco chapado. Usa o cálculo do app no lugar da LUT da Apple.</span>
+            </span>
+            <span className="relative h-[31px] w-[51px] shrink-0">
+              <input type="checkbox" role="switch" checked={softHighlights} disabled={disabled} onChange={(event) => onSoftHighlights(event.target.checked)} className="peer absolute inset-0 z-10 cursor-pointer opacity-0" />
+              <span aria-hidden="true" className="absolute inset-0 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-white peer-disabled:opacity-40" />
+              <span aria-hidden="true" className="absolute left-0.5 top-0.5 size-[27px] rounded-full bg-white transition-transform peer-checked:translate-x-5 motion-reduce:transition-none" />
+            </span>
+          </label>
+        )}
         {hdr && <p role="status" className="rounded-2xl bg-amber-500/15 px-3 py-2 text-xs text-amber-200">O navegador indica que este vídeo é HDR. Não há suporte garantido: a prévia pode não ficar correta.</p>}
 
         <div className="mt-2 overflow-hidden rounded-2xl bg-surface-2">

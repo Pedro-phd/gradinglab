@@ -1,5 +1,6 @@
 // Plano e verificação de suporte da exportação, sem DOM, WebCodecs nem Mediabunny: as APIs entram injetadas.
 import type { CubeLut } from "./cube-lut";
+import type { Effects } from "./effects";
 import type { LutLayer } from "./lut-state";
 import { isHdrFrame, type SourceProfile } from "./color-pipeline";
 
@@ -32,8 +33,8 @@ export async function countPlayedPackets(packets: AsyncIterable<{ timestamp: num
   return count;
 }
 
-/** Estado de cor do editor no momento do clique: é o que a prévia usa. */
-export type ExportColor = { profile: SourceProfile; lutExpectsLog: boolean; layers: LutLayer[]; normalizationLut?: CubeLut | null };
+/** Estado de cor do editor no momento do clique: é o que a prévia usa. effects ausente = nenhum ajuste. */
+export type ExportColor = { profile: SourceProfile; lutExpectsLog: boolean; layers: LutLayer[]; normalizationLut?: CubeLut | null; softHighlights?: boolean; effects?: Effects };
 
 export type ExportPlan = {
   container: "mp4";

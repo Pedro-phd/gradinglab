@@ -5,10 +5,11 @@ import type { LibraryFolder } from "./lut-library";
 
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
 
-export type Tool = "looks" | "pilha" | "origem" | "comparar";
+export type Tool = "looks" | "ajustes" | "pilha" | "origem" | "comparar";
 
 const TOOLS: { id: Tool; label: string; icon: string }[] = [
   { id: "looks", label: "Looks", icon: "M12 3a9 9 0 100 18 9 9 0 000-18zM12 3v18M3 12h18" },
+  { id: "ajustes", label: "Ajustes", icon: "M4 7h9M17 7h3M15 5v4M4 17h3M11 17h9M9 15v4" },
   { id: "pilha", label: "Pilha", icon: "M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5" },
   { id: "origem", label: "Origem", icon: "M4 6h16M4 12h10M4 18h6" },
   { id: "comparar", label: "Comparar", icon: "M12 3v18M5 5h14v14H5z" },
@@ -97,10 +98,10 @@ export function LookStrip({ folders, thumbs, active, enabled, notice, onPick, on
   );
 }
 
-// Barra de ferramentas embaixo, como a de um app nativo: "Looks" é a faixa acima; as outras abrem painéis.
+// Barra de ferramentas embaixo, como a de um app nativo: "Looks" e "Ajustes" trocam a faixa acima; as outras abrem painéis.
 export function ToolBar({ current, onSelect }: { current: Tool; onSelect: (tool: Tool) => void }) {
   return (
-    <nav aria-label="Ferramentas" className="mt-3 grid shrink-0 grid-cols-4 border-t border-white/10 px-2 pb-[max(env(safe-area-inset-bottom),12px)] pt-2.5">
+    <nav aria-label="Ferramentas" className="mt-3 grid shrink-0 grid-cols-5 border-t border-white/10 px-2 pb-[max(env(safe-area-inset-bottom),12px)] pt-2.5">
       {TOOLS.map(({ id, label, icon }) => (
         <button
           key={id}
