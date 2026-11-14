@@ -62,7 +62,8 @@ export function Sheet({ open, onClose, title, titleId, action, tall = false, foo
           {action}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
+      {/* flex-auto, não flex-1: com altura só por max-h, o Safari zera um filho com base 0% e o painel mostra só o título. */}
+      <div className="min-h-0 flex-auto overflow-y-auto overscroll-contain">{children}</div>
       {footer}
     </dialog>
   );
