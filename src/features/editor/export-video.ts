@@ -53,7 +53,13 @@ function createCanvas(): RenderCanvas {
 }
 
 // Falhas são mostradas como motivo legível; nada de stack, nome de arquivo ou conteúdo da mídia.
-export async function runExport(request: ExportRequest, signal: AbortSignal, emit: (action: ExportAction) => void) {
+export async function runExport(request: ExportRequest, signal: AbortSignal, send: (action: ExportAction) => void) {
+  let stage = "início";
+  const emit = (action: ExportAction) => {
+    if (action.type === "stage") stage = action.stage;
+    else if (action.type === "prepared") stage = "conversão";
+    send(action);
+  };
   const input = new Input({ source: new BlobSource(request.file), formats: [MP4, QTFF] });
   let renderer: ReturnType<typeof createLutRenderer> = null;
   let writable: WritableStream | null = null;
@@ -147,7 +153,8 @@ export async function runExport(request: ExportRequest, signal: AbortSignal, emi
     if (!started) await writable?.abort().catch(() => undefined);
     await discardTemp(request.handle);
     if (error instanceof ConversionCanceledError || signal.aborted) emit({ type: "cancel" });
-    else emit({ type: "fail", error: exportError(error instanceof ExportFailure ? error.code : "export_failed") });
+    else if (error instanceof ExportFailure) emit({ type: "fail", error: exportError(error.code) });
+    else emit({ type: "fail", error: exportError("export_failed", `${stage} — ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`) });
   } finally {
     signal.removeEventListener("abort", onAbort);
     renderer?.dispose();

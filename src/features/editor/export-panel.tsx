@@ -28,7 +28,7 @@ export function ExportSection({ file, lutName, summary, color, blocked }: Props)
   return (
     <section aria-labelledby="exportar-titulo" className="flex flex-col gap-3">
       <h2 id="exportar-titulo" className="font-display text-[15px] font-semibold">Exportar</h2>
-      {state.status === "failed" && state.error && <p role="alert" className="rounded-2xl bg-red-500/15 px-4 py-3 text-sm text-red-200">{state.error.message}</p>}
+      {state.status === "failed" && state.error && <p role="alert" className="rounded-2xl bg-red-500/15 px-4 py-3 text-sm text-red-200">{state.error.message}{state.error.detail && <span className="mt-2 block break-words text-xs text-red-200/70">Detalhe técnico: {state.error.detail}</span>}</p>}
       {state.status === "cancelled" && <p role="status" className="rounded-2xl bg-white/10 px-4 py-3 text-sm">Exportação cancelada. Nada foi baixado e o vídeo original continua aberto.</p>}
       {state.status === "done" && downloadUrl && (
         <p role="status" className="rounded-2xl bg-accent/15 px-4 py-3 text-sm">

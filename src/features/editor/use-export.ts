@@ -93,7 +93,7 @@ export function useExport() {
       if (!keep) mine.temp?.remove(); // runExport já apagou; aqui só cobre worker que caiu
     };
     // Qualquer falha ao iniciar (worker, cópia do pedido) vira erro na tela, nunca um 0% parado.
-    const launch = (inWorker: boolean) => launchUnsafe(inWorker).catch(() => emit({ type: "fail", error: exportError("export_failed") }));
+    const launch = (inWorker: boolean) => launchUnsafe(inWorker).catch((error: unknown) => emit({ type: "fail", error: exportError("export_failed", `ao iniciar — ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`) }));
     async function launchUnsafe(inWorker: boolean) {
       dispatch({ type: "stage", stage: "Abrindo o armazenamento local…" });
       mine.temp = await openTempFile();
@@ -107,7 +107,7 @@ export function useExport() {
         const worker = new Worker(new URL("./export-worker.ts", import.meta.url), { type: "module" });
         mine.worker = worker;
         worker.onmessage = (event: MessageEvent<ExportAction>) => emit(event.data);
-        worker.onerror = () => emit({ type: "fail", error: exportError("export_failed") });
+        worker.onerror = (event) => emit({ type: "fail", error: exportError("export_failed", `worker — ${event.message || "erro sem mensagem"}`) });
         worker.postMessage(request);
       } else {
         // Sem Worker ou OffscreenCanvas (ou depois de o worker não achar WebGL2): a mesma exportação na thread principal.

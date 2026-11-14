@@ -64,7 +64,8 @@ export type ExportErrorCode =
   | "incomplete_output"
   | "export_failed";
 
-export type ExportError = { code: ExportErrorCode; message: string };
+/** detail: etapa e mensagem técnica do navegador, para diagnóstico. Nunca traz nome de arquivo nem conteúdo da mídia. */
+export type ExportError = { code: ExportErrorCode; message: string; detail?: string };
 
 const MESSAGES: Record<ExportErrorCode, string> = {
   webcodecs_unavailable: "Este navegador não tem WebCodecs, necessário para exportar o vídeo. Use uma versão recente do Chrome, Edge ou Safari. Nada foi enviado.",
@@ -78,8 +79,8 @@ const MESSAGES: Record<ExportErrorCode, string> = {
   export_failed: "A exportação falhou no meio do caminho e nada foi baixado. O original continua intacto. Tente de novo ou use um vídeo menor.",
 };
 
-export function exportError(code: ExportErrorCode): ExportError {
-  return { code, message: MESSAGES[code] };
+export function exportError(code: ExportErrorCode, detail?: string): ExportError {
+  return detail ? { code, message: MESSAGES[code], detail: detail.slice(0, 300) } : { code, message: MESSAGES[code] };
 }
 
 // Pelo codec declarado: HEVC Main10 (perfil 2), VP9 perfis 2 e 3, AV1 com 10 bits. Sem a declaração, não afirma nada.
