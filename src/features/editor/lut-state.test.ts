@@ -14,6 +14,16 @@ describe("pilha de LUTs do editor", () => {
     expect(state.stack.map((item) => item.intensity)).toEqual([100, 100]);
   });
 
+  it("trocar o look substitui só a última LUT e mantém a intensidade dela", () => {
+    const state = run(add("base.cube"), add("look.cube"), { type: "intensity", id: 2, percent: 40 }, { type: "replaced", lut: lut(), name: "outro.cube" });
+    expect(names(state)).toEqual(["base.cube", "outro.cube"]);
+    expect(state.stack.map((item) => item.intensity)).toEqual([100, 40]);
+  });
+
+  it("trocar o look com a pilha vazia adiciona a LUT", () => {
+    expect(names(run({ type: "replaced", lut: lut(), name: "look.cube" }))).toEqual(["look.cube"]);
+  });
+
   it("LUT inválida mantém a pilha e expõe a mensagem de erro", () => {
     const state = run(add("look.cube"), { type: "failed", message: "Arquivo inválido." });
     expect(names(state)).toEqual(["look.cube"]);

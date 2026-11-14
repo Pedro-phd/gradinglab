@@ -69,7 +69,9 @@ export function useExport() {
     // O job e o AbortController existem antes de qualquer await: cancelar na fase inicial já vale.
     const mine: Job = { controller: new AbortController(), worker: null, temp: null, active: true, cancelled: false, retried: false };
     job.current = mine;
-    const emit = (action: ExportAction) => {
+    const emit = (incoming: ExportAction) => {
+      // Carimba o relógio aqui (thread principal) para a estimativa de tempo restante.
+      const action: ExportAction = incoming.type === "prepared" || incoming.type === "progress" ? { ...incoming, at: performance.now() } : incoming;
       // Sem WebGL2 no worker: tenta uma vez na thread principal (o worker já apagou o temporário).
       if (action.type === "fail" && action.error.code === "webgl_unavailable" && mine.worker && !mine.retried && !mine.cancelled) {
         mine.retried = true;

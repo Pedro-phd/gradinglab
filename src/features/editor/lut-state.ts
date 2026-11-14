@@ -21,6 +21,8 @@ export type LutState = {
 
 export type LutAction =
   | { type: "added"; lut: CubeLut; name: string }
+  /** Fileira de looks: troca a última LUT da pilha (o look por cima), mantendo a intensidade; sem pilha, adiciona. */
+  | { type: "replaced"; lut: CubeLut; name: string }
   | { type: "failed"; message: string }
   | { type: "removed"; id: number }
   | { type: "moved"; id: number; offset: -1 | 1 }
@@ -45,6 +47,13 @@ export function lutReducer(state: LutState, action: LutAction): LutState {
     case "added":
       if (state.stack.length >= MAX_STACKED_LUTS) return fail(state, `A pilha aceita até ${MAX_STACKED_LUTS} LUTs. Remova uma para adicionar outra.`);
       return { ...withStack(state, [...state.stack, { id: state.nextId, lut: action.lut, name: action.name, intensity: 100 }]), nextId: state.nextId + 1 };
+    case "replaced": {
+      const last = state.stack.at(-1);
+      if (!last) return lutReducer(state, { type: "added", lut: action.lut, name: action.name });
+      // Id novo: é outra LUT, então a marcação de Log da anterior não passa para ela.
+      const next = { id: state.nextId, lut: action.lut, name: action.name, intensity: last.intensity };
+      return { ...withStack(state, [...state.stack.slice(0, -1), next]), nextId: state.nextId + 1 };
+    }
     case "failed":
       // LUT inválida: a pilha (e a prévia) continua como estava; só mostra o erro.
       return fail(state, action.message);

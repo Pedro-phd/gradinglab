@@ -9,6 +9,9 @@ export type ExportState = {
   framesDone: number;
   /** Etapa da preparação, para a tela dizer onde está (e onde parou, se parar). */
   stage: string | null;
+  /** Instantes (ms, relógio do hook) do início da codificação e do último progresso: base da estimativa de tempo. */
+  startedAt: number | null;
+  lastAt: number | null;
   /** Só existe em "done": cancelar ou falhar nunca deixa arquivo. */
   output: ExportOutput | null;
   error: ExportError | null;
@@ -17,15 +20,15 @@ export type ExportState = {
 export type ExportAction =
   | { type: "start" }
   | { type: "stage"; stage: string }
-  | { type: "prepared"; plan: ExportSummary }
-  | { type: "progress"; done: number }
+  | { type: "prepared"; plan: ExportSummary; at?: number }
+  | { type: "progress"; done: number; at?: number }
   | { type: "finalizing" }
   | { type: "finished"; framesWritten: number; output: ExportOutput }
   | { type: "cancel" }
   | { type: "fail"; error: ExportError }
   | { type: "reset" };
 
-export const idleExport: ExportState = { status: "idle", plan: null, framesDone: 0, stage: null, output: null, error: null };
+export const idleExport: ExportState = { status: "idle", plan: null, framesDone: 0, stage: null, startedAt: null, lastAt: null, output: null, error: null };
 
 const ACTIVE: ExportState["status"][] = ["preparing", "encoding", "finalizing"];
 
@@ -37,10 +40,10 @@ export function exportReducer(state: ExportState, action: ExportAction): ExportS
     case "stage":
       return status === "preparing" ? { ...state, stage: action.stage } : state;
     case "prepared":
-      return status === "preparing" ? { ...state, status: "encoding", plan: action.plan } : state;
+      return status === "preparing" ? { ...state, status: "encoding", plan: action.plan, startedAt: action.at ?? null, lastAt: action.at ?? null } : state;
     case "progress":
       // Nunca regride e nunca passa do total; eventos atrasados depois de cancelar são ignorados.
-      return status === "encoding" ? { ...state, framesDone: Math.max(state.framesDone, action.done) } : state;
+      return status === "encoding" ? { ...state, framesDone: Math.max(state.framesDone, action.done), lastAt: action.at ?? state.lastAt } : state;
     case "finalizing":
       return status === "encoding" ? { ...state, status: "finalizing" } : state;
     case "finished":
@@ -63,4 +66,17 @@ export function exportReducer(state: ExportState, action: ExportAction): ExportS
 export function progressFraction(state: ExportState): number {
   const total = state.plan?.totalFrames ?? 0;
   return total > 0 ? Math.min(1, state.framesDone / total) : 0;
+}
+
+/** Tempo restante em ms pelo ritmo até agora; null no começo, quando a estimativa ainda engana. */
+export function remainingMs(state: ExportState): number | null {
+  const fraction = progressFraction(state);
+  if (state.startedAt === null || state.lastAt === null || fraction < 0.03 || fraction >= 1) return null;
+  const elapsed = state.lastAt - state.startedAt;
+  return elapsed < 2000 ? null : (elapsed * (1 - fraction)) / fraction;
+}
+
+export function formatRemaining(ms: number | null): string | null {
+  if (ms === null) return null;
+  return ms < 60_000 ? "menos de 1 min" : `cerca de ${Math.round(ms / 60_000)} min`;
 }

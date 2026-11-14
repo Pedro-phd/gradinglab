@@ -1,11 +1,14 @@
 @import "tailwindcss";
 
 :root {
-  --background: #12110f;
+  --background: #0b0a09;
   --foreground: #f4f1ea;
   --muted: #b5b0a6;
   --accent: #d9f26b;
   --accent-ink: #14130f;
+  --surface: #1c1b18;
+  --surface-2: #2a2925;
+  --danger: #ff8a7a;
   color-scheme: dark;
 }
 
@@ -15,23 +18,33 @@
   --color-muted: var(--muted);
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-danger: var(--danger);
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-display: var(--font-space-grotesk), var(--font-inter), sans-serif;
 }
 
 body {
-  background:
-    radial-gradient(60% 50% at 25% 0%, rgb(125 150 130 / 0.26), transparent 70%),
-    radial-gradient(50% 50% at 95% 100%, rgb(217 201 166 / 0.12), transparent 70%),
-    var(--background);
+  background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  /* Sensação de app: sem o realce cinza do toque nem o "puxa e volta" da página. */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
 
-/* Gaveta da galeria de LUTs subindo; só roda com motion-safe. */
+/* Faixas que rolam para o lado sem barra visível, como no iOS. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Painel subindo de baixo; só roda com motion-safe. */
 @keyframes sheet-up {
   from {
-    transform: translateY(24px);
-    opacity: 0;
+    transform: translateY(100%);
   }
 }

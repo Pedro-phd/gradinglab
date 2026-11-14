@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
@@ -15,7 +15,12 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "GradingLab",
   description: "Central de geração, aplicação e edição de looks de cor.",
+  // Adicionado à tela de início do iPhone, abre em tela cheia, sem a barra do Safari.
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "GradingLab" },
 };
+
+// viewport-fit=cover: o conteúdo vai até as bordas e cada tela recua pelas áreas seguras (env(safe-area-inset-*)).
+export const viewport: Viewport = { viewportFit: "cover", themeColor: "#000000" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

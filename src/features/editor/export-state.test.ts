@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ExportSummary } from "./export-plan";
-import { exportReducer, idleExport, progressFraction, type ExportAction, type ExportState } from "./export-state";
+import { exportReducer, formatRemaining, idleExport, progressFraction, remainingMs, type ExportAction, type ExportState } from "./export-state";
 
 const plan: ExportSummary = {
   container: "mp4", videoCodec: "avc", width: 1920, height: 1080, rotation: 0, frameRate: 30,
@@ -75,5 +75,23 @@ describe("máquina de estados da exportação", () => {
   it("não inicia outra exportação enquanto uma está em andamento", () => {
     const state = run(...encoding());
     expect(exportReducer(state, { type: "start" })).toBe(state);
+  });
+});
+
+describe("tempo restante", () => {
+  const at = (done: number, ms: number): ExportAction => ({ type: "progress", done, at: ms });
+  const started = (): ExportAction[] => [{ type: "start" }, { type: "prepared", plan, at: 0 }];
+
+  it("estima pelo ritmo até agora: 250 de 1000 quadros em 10 s → 30 s", () => {
+    expect(remainingMs(run(...started(), at(250, 10_000)))).toBe(30_000);
+  });
+  it("não estima no começo, quando o número engana", () => {
+    expect(remainingMs(run(...started(), at(10, 10_000)))).toBeNull();
+    expect(remainingMs(run(...started(), at(300, 1_000)))).toBeNull();
+  });
+  it("arredonda para minutos e diz 'menos de 1 min' abaixo disso", () => {
+    expect(formatRemaining(30_000)).toBe("menos de 1 min");
+    expect(formatRemaining(150_000)).toBe("cerca de 3 min");
+    expect(formatRemaining(null)).toBeNull();
   });
 });

@@ -3,17 +3,16 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ChangeEvent, type SyntheticEvent } from "react";
 import { chooseProfile, isHdrFrame, planPipeline, suggestProfile, type FrameColorInfo, type SourceProfile } from "./color-pipeline";
 import type { CubeLut } from "./cube-lut";
-import {
-  describeDimensions,
-  describeVideoError,
-  formatDuration,
-  validateVideoFile,
-} from "./local-video";
+import { describeDimensions, describeVideoError, formatDuration, validateVideoFile } from "./local-video";
 import { ConversionCancelled, convertToH264 } from "./convert-video";
-import { LookPanel } from "./look-panel";
-import { LutPreview } from "./lut-preview";
-import { ExportSection } from "./export-panel";
+import type { CompareMode } from "./compare";
+import { ExportControl } from "./export-screen";
+import { ConvertingScreen, HomeScreen } from "./home-screen";
+import { LookStrip, ToolBar, type Tool } from "./look-strip";
+import { LutPreview, type Snapshot } from "./lut-preview";
 import { initialLutState, lutLayers, lutReducer, stackLabel } from "./lut-state";
+import { CompareSheet, OriginSheet, profileLabel } from "./source-profile";
+import { StackSheet } from "./stack-sheet";
 import { LutGallery } from "./lut-gallery";
 import { findItem } from "./lut-library";
 import { useLookThumbnails } from "./use-look-thumbnails";
@@ -29,10 +28,7 @@ type State =
   // converted: o arquivo em uso é a cópia H.264 (8 bits); a exportação sai dela.
   | { kind: "video"; name: string; file: File; url: string; autoPlay: boolean; metadata: Metadata | null; converted: boolean };
 
-const panel = "rounded-[28px] border border-white/10 bg-white/[.07] backdrop-blur-xl";
-// Por id: o foco do input da LUT não deve acender os labels do vídeo.
-const pill =
-  "inline-flex h-11 cursor-pointer items-center justify-center rounded-full px-5 text-sm font-semibold motion-safe:transition-colors group-has-[#video-input:focus-visible]:outline-2 group-has-[#video-input:focus-visible]:outline-offset-2 group-has-[#video-input:focus-visible]:outline-white";
+const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
 
 export function VideoPicker() {
   const [state, setState] = useState<State>({ kind: "empty" });
@@ -47,10 +43,15 @@ export function VideoPicker() {
   // O que a prévia mostra é o que a exportação leva. useMemo: a prévia redesenha quando a pilha muda.
   const layers = useMemo(() => lutLayers(lutState, plan.intensityAvailable), [lutState, plan.intensityAvailable]);
   const label = stackLabel(lutState);
+  const active = lutState.stack.at(-1) ?? null;
   const singlePercent = lutState.stack.length === 1 ? lutState.stack[0]!.intensity : null;
 
   const library = useLutLibrary();
+  // Ferramenta aberta: "looks" é a faixa fixa; as outras abrem um painel por cima. A galeria abre a partir da pilha.
+  const [tool, setTool] = useState<Tool>("looks");
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [mode, setMode] = useState<CompareMode>("compare");
+  const snapshot = useRef<(() => Snapshot | null) | null>(null);
   const [pausedFrame, setPausedFrame] = useState<{ video: HTMLVideoElement | null; version: number }>({ video: null, version: 0 });
   const markPausedFrame = useCallback((video: HTMLVideoElement | null) => setPausedFrame((current) => ({ video, version: current.version + 1 })), []);
   // Apple Log: a conversão para Rec.709 é a LUT da Apple, baixada do próprio app só quando o perfil pede.
@@ -69,11 +70,26 @@ export function VideoPicker() {
   const thumbs = useLookThumbnails({ video: pausedFrame.video, frameVersion: pausedFrame.version, base: layers, normalization, candidates, enabled: !unsupported && plan.applyLook });
   const thumbStatus = unsupported ? "Indisponível sem WebGL2." : !plan.applyLook ? "Confirme a origem do vídeo para gerar as miniaturas." : null;
 
-  function addFromLibrary(id: string) {
+  // Galeria: tocar adiciona; tocar de novo numa que já está na pilha tira a última com esse nome.
+  function toggleFromLibrary(id: string) {
     const item = findItem(library.folders, id);
     if (!item?.lut) return;
-    dispatchLut({ type: "added", lut: item.lut, name: item.fullName });
-    setGalleryOpen(false);
+    const inStack = lutState.stack.findLast((layer) => layer.name === item.fullName);
+    dispatchLut(inStack ? { type: "removed", id: inStack.id } : { type: "added", lut: item.lut, name: item.fullName });
+  }
+  // Faixa de looks: troca o look por cima (a última LUT), como escolher um filtro.
+  function pickFromStrip(id: string) {
+    const item = findItem(library.folders, id);
+    if (item?.lut && item.fullName !== lutState.stack.at(-1)?.name) dispatchLut({ type: "replaced", lut: item.lut, name: item.fullName });
+  }
+  const thumbFor = (name: string) => {
+    const item = library.folders.flatMap((folder) => folder.items).find((entry) => entry.fullName === name);
+    return item ? thumbs[item.id] : undefined;
+  };
+  // As miniaturas saem do quadro pausado: pausar ao abrir a galeria garante que existam.
+  function openGallery() {
+    document.querySelector<HTMLVideoElement>("main video")?.pause();
+    setGalleryOpen(true);
   }
   // A cópia convertida não carrega as primárias do original: a sugestão de perfil usa o que o ffmpeg leu da origem.
   const sourceColor = useRef<FrameColorInfo | null>(null);
@@ -156,32 +172,46 @@ export function VideoPicker() {
     showError(describeVideoError(code));
   }
 
-  const pickerLabel = (text: string, className: string) => (
-    <label htmlFor="video-input" className={`${pill} ${className}`}>
-      {text}
-    </label>
-  );
+  const webCodecs = typeof VideoEncoder !== "undefined" && typeof VideoDecoder !== "undefined";
+  const blocked = unsupported ? "Indisponível sem WebGL2." : !webCodecs ? "Este navegador não tem WebCodecs para exportar." : lutState.stack.length === 0 ? "Adicione uma LUT para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null;
+  const enabled = !unsupported && plan.intensityAvailable;
+  const disabledReason = unsupported ? "Indisponível sem WebGL2." : !plan.intensityAvailable ? "Confirme a origem do vídeo para ajustar as intensidades." : null;
+  const closeTool = () => setTool("looks");
+
+  function closeVideo() {
+    conversion.current?.abort();
+    setTool("looks");
+    setState({ kind: "empty" });
+  }
 
   return (
-    <main className="group flex flex-1 flex-col gap-4">
-      {/* Fica fora do fluxo visual, mas focável; o label real abre o seletor. */}
-      <input
-        id="video-input"
-        type="file"
-        accept="video/*,.mov,.qt,video/quicktime"
-        onChange={handleChange}
-        className="sr-only"
-      />
+    <main className="group flex flex-1 flex-col">
+      {/* Fica fora do fluxo visual, mas focável; os rótulos de cada tela abrem o seletor. */}
+      <input id="video-input" type="file" accept="video/*,.mov,.qt,video/quicktime" onChange={handleChange} className="sr-only" />
 
       {state.kind === "video" ? (
-        // No celular a intensidade fica logo abaixo do vídeo; no computador, no painel lateral.
-        <div className="grid flex-1 content-start gap-4 md:grid-cols-[minmax(0,1fr)_380px] md:grid-rows-[1fr_auto]">
-          <section aria-label="Prévia do vídeo" className="flex min-w-0 flex-col items-center justify-start gap-3 md:justify-center">
-            {lutState.stack.length > 0 && plan.requiresConfirmation && !unsupported && (
-              <p role="status" className="w-full rounded-2xl bg-amber-500/15 px-4 py-3 text-sm text-amber-200">
-                Confirme a origem do vídeo (Apple Log ou Normal) para aplicar o look. Enquanto isso, a prévia mostra o quadro sem alteração.
-              </p>
-            )}
+        // Tela cheia, como um editor nativo: vídeo em cima, looks e ferramentas embaixo (à direita no computador).
+        <div className="fixed inset-0 flex flex-col overscroll-none bg-black md:grid md:grid-cols-[minmax(0,1fr)_400px] md:grid-rows-[auto_minmax(0,1fr)]">
+          <header className="flex shrink-0 items-center justify-between gap-2 px-3 pt-[max(env(safe-area-inset-top),12px)] md:col-span-2 md:pb-1">
+            <button type="button" aria-label="Fechar vídeo" onClick={closeVideo} className={`flex size-11 items-center justify-center rounded-full bg-surface ${focus}`}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+            <button type="button" aria-label={`Origem do vídeo: ${profileLabel(choice.profile)}`} onClick={() => setTool("origem")} className={`flex h-11 items-center gap-1.5 rounded-full bg-surface px-3 text-[13px] font-semibold ${focus}`}>
+              <span aria-hidden="true" className={`size-2 rounded-full ${choice.profile === "unknown" ? "bg-amber-400" : "bg-accent"}`} />
+              {profileLabel(choice.profile)}
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+            <ExportControl
+              key={state.url}
+              file={state.file}
+              lutName={active?.name ?? null}
+              color={{ profile: choice.profile, lutExpectsLog, layers, normalizationLut: appleLut }}
+              blocked={blocked}
+              snapshot={() => snapshot.current?.() ?? null}
+            />
+          </header>
+
+          <section aria-label="Prévia do vídeo" className="flex min-h-0 flex-1 flex-col px-3 pt-3 md:pb-3">
             <LutPreview
               key={state.url}
               src={state.url}
@@ -196,96 +226,74 @@ export function VideoPicker() {
               onFrameColor={markFrameColor}
               onPausedFrame={markPausedFrame}
               unsupported={unsupported}
+              mode={mode}
+              snapshotRef={snapshot}
               onUnsupported={markUnsupported}
               onLoadedMetadata={handleMetadata}
               onVideoError={handleVideoError}
             />
           </section>
-          <section
-            aria-label="Informações do vídeo"
-            className={`${panel} order-3 flex min-w-0 flex-wrap items-center justify-between gap-4 p-4 md:order-none`}
-          >
-            <div className="min-w-0">
-              <h2 className="truncate font-display text-base font-semibold">{state.name}</h2>
-              <p className="text-sm text-muted">
-                {state.metadata
-                  ? `${formatDuration(state.metadata.duration)} · ${describeDimensions(state.metadata.width, state.metadata.height)}${state.converted ? " · convertido neste aparelho (8 bits)" : ""}`
-                  : "Lendo informações do vídeo…"}
-              </p>
-            </div>
-            {pickerLabel("Escolher outro vídeo", "border border-white/20 text-foreground hover:bg-white/10")}
-          </section>
-          <LookPanel
-            state={lutState}
-            dispatch={dispatchLut}
-            unsupported={unsupported}
+
+          <div className="flex shrink-0 flex-col md:justify-end md:border-l md:border-white/10">
+            <LookStrip
+              folders={library.folders}
+              thumbs={thumbs}
+              active={active && { name: active.name, intensity: active.intensity }}
+              enabled={enabled}
+              onPick={pickFromStrip}
+              onIntensity={(percent) => active && dispatchLut({ type: "intensity", id: active.id, percent })}
+              notice={
+                lutState.stack.length > 0 && plan.requiresConfirmation && !unsupported ? (
+                  <button type="button" onClick={() => setTool("origem")} className={`mx-5 rounded-2xl bg-amber-500/15 px-4 py-3 text-left text-[13px] text-amber-200 ${focus}`}>
+                    Confirme a origem do vídeo (Apple Log ou Normal) para aplicar o look. Toque para escolher.
+                  </button>
+                ) : null
+              }
+            />
+            <ToolBar current={tool} onSelect={setTool} />
+          </div>
+
+          <StackSheet open={tool === "pilha"} onClose={closeTool} state={lutState} dispatch={dispatchLut} enabled={enabled} disabledReason={disabledReason} plan={plan} thumbFor={thumbFor} onAdd={openGallery} />
+          <OriginSheet
+            open={tool === "origem"}
+            onClose={closeTool}
             choice={choice}
             plan={plan}
+            lutExpectsLog={lutExpectsLog}
             hdr={hdr}
-            onProfileChange={(profile: SourceProfile) => setChoice(chooseProfile(profile))}
-            onOpenGallery={() => {
-              // As miniaturas saem do quadro pausado: pausar ao abrir garante que existam.
-              document.querySelector<HTMLVideoElement>("main video")?.pause();
-              setGalleryOpen(true);
+            disabled={unsupported}
+            onChoose={(profile: SourceProfile) => setChoice(chooseProfile(profile))}
+            video={{
+              name: state.name,
+              details: state.metadata
+                ? `${formatDuration(state.metadata.duration)} · ${describeDimensions(state.metadata.width, state.metadata.height)}${state.converted ? " · convertido neste aparelho (8 bits)" : ""}`
+                : "Lendo informações do vídeo…",
             }}
-            exportSection={
-              <ExportSection
-                key={state.url}
-                file={state.file}
-                lutName={lutState.stack.at(-1)?.name ?? null}
-                summary={label === null ? "sem LUT" : singlePercent === null ? label : `${label} · ${singlePercent}%`}
-                color={{ profile: choice.profile, lutExpectsLog, layers, normalizationLut: appleLut }}
-                blocked={unsupported ? "Indisponível sem WebGL2." : lutState.stack.length === 0 ? "Adicione uma LUT para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null}
-              />
-            }
+            onPickAnother={() => {
+              closeTool();
+              document.getElementById("video-input")?.click();
+            }}
+          />
+          <CompareSheet open={tool === "comparar"} onClose={closeTool} mode={mode} onChange={setMode} />
+          <LutGallery
+            open={galleryOpen}
+            onClose={() => setGalleryOpen(false)}
+            folders={library.folders}
+            thumbs={thumbs}
+            thumbStatus={thumbStatus}
+            disabled={unsupported}
+            stacked={lutState.stack.map((layer) => layer.name)}
+            error={lutState.error}
+            onToggle={toggleFromLibrary}
+            onImport={(files, fallbackName) => void library.importFiles(files, fallbackName)}
+            onRemoveFolder={library.removeFolder}
           />
         </div>
       ) : state.kind === "converting" ? (
-        <section aria-labelledby="convertendo-titulo" className={`${panel} m-auto flex w-full max-w-xl flex-col items-center gap-5 p-8 text-center`}>
-          <h2 id="convertendo-titulo" className="font-display text-2xl font-semibold">Convertendo o vídeo</h2>
-          <p className="text-sm text-muted">
-            Este navegador não abre o formato de <strong className="text-foreground">{state.name}</strong> (ex.: ProRes). Uma cópia em H.264 está sendo gerada aqui no seu aparelho; nada é enviado. Pode levar alguns minutos.
-          </p>
-          <div role="progressbar" aria-label="Conversão do vídeo" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(state.progress * 100)} className="h-2.5 w-full overflow-hidden rounded-full bg-black/40">
-            <div className="h-full rounded-full bg-accent" style={{ width: `${state.progress * 100}%` }} />
-          </div>
-          <p className="font-display text-xl font-semibold tabular-nums text-accent">{Math.round(state.progress * 100)}%</p>
-          <button type="button" onClick={() => { conversion.current?.abort(); setState({ kind: "empty" }); }} className="h-11 rounded-full border border-white/20 px-5 text-sm font-semibold hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Cancelar</button>
-        </section>
+        <ConvertingScreen name={state.name} progress={state.progress} onCancel={closeVideo} />
       ) : (
-        <section
-          aria-labelledby="entrada-titulo"
-          className={`${panel} m-auto flex w-full max-w-xl flex-col items-center gap-5 p-8 text-center`}
-        >
-          <h2 id="entrada-titulo" className="font-display text-2xl font-semibold">
-            Escolha um vídeo do seu aparelho
-          </h2>
-          {state.kind === "error" && (
-            <p key={state.attempt} role="alert" className="rounded-2xl bg-red-500/15 px-4 py-3 text-sm text-red-200">
-              {state.message}
-            </p>
-          )}
-          <p className="text-sm text-muted">
-            O vídeo é lido direto no seu aparelho. Nenhum byte é enviado e o original não é alterado.
-            Os formatos aceitos dependem do seu navegador.
-          </p>
-          {pickerLabel(
-            state.kind === "error" ? "Tentar outro vídeo" : "Escolher vídeo",
-            "bg-accent text-accent-ink hover:brightness-110",
-          )}
-        </section>
+        <HomeScreen inputId="video-input" error={state.kind === "error" ? { message: state.message, attempt: state.attempt } : null} />
       )}
-      <LutGallery
-        open={galleryOpen}
-        onClose={() => setGalleryOpen(false)}
-        folders={library.folders}
-        thumbs={thumbs}
-        thumbStatus={thumbStatus}
-        disabled={unsupported}
-        onAdd={addFromLibrary}
-        onImport={(files, fallbackName) => void library.importFiles(files, fallbackName)}
-        onRemoveFolder={library.removeFolder}
-      />
     </main>
   );
 }

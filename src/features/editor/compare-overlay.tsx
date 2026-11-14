@@ -1,15 +1,9 @@
 "use client";
 
 import type { KeyboardEvent, PointerEvent } from "react";
-import { nextSplit, splitFromPointer, type CompareMode, type CompareView } from "./compare";
+import { nextSplit, splitFromPointer, type CompareView } from "./compare";
 
-const chip = "rounded-full bg-[#12110f]/60 px-3.5 py-2 text-[13px] font-medium text-foreground backdrop-blur-md";
-
-const MODES: [CompareMode, string][] = [
-  ["compare", "Antes / depois"],
-  ["result", "Só o resultado"],
-  ["original", "Original"],
-];
+const chip = "rounded-[10px] bg-black/55 px-2.5 py-1 text-xs font-semibold text-foreground backdrop-blur-md";
 
 function Chip({ full, short, className = "" }: { full: string; short: string | null; className?: string }) {
   return (
@@ -17,24 +11,6 @@ function Chip({ full, short, className = "" }: { full: string; short: string | n
       <span className="md:hidden">{short ?? full}</span>
       <span className="hidden md:inline">{full}</span>
     </span>
-  );
-}
-
-export function ModeGroup({ mode, onChange }: { mode: CompareMode; onChange: (mode: CompareMode) => void }) {
-  return (
-    <div role="group" aria-label="Modo de comparação" className="flex w-fit max-w-full flex-wrap gap-1 rounded-full border border-white/10 bg-white/[.08] p-1">
-      {MODES.map(([id, label]) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={mode === id}
-          onClick={() => onChange(id)}
-          className={`h-11 whitespace-nowrap rounded-full px-4 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${mode === id ? "bg-accent text-accent-ink" : "text-foreground hover:bg-white/10"}`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -56,14 +32,14 @@ export function CompareOverlay({ view, split, onSplit }: { view: CompareView; sp
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-4 top-4 flex justify-between gap-2">
+      <div className="pointer-events-none absolute inset-x-3 top-3 flex justify-between gap-2">
         {view.leftLabel && <Chip full={view.leftLabel} short={view.leftShort} />}
         {view.rightLabel && <Chip full={view.rightLabel} short={view.rightShort} className="ml-auto truncate" />}
       </div>
       {view.handleVisible && (
         <>
           {/* A linha fica no ponto exato; só a alça é afastada das bordas, para o recorte do container não cortá-la. */}
-          <span aria-hidden="true" style={{ left: `${split * 100}%` }} className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-white shadow-[0_0_0_1px_rgb(0_0_0/.25)]" />
+          <span aria-hidden="true" style={{ left: `${split * 100}%` }} className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-foreground shadow-[0_0_0_1px_rgb(0_0_0/.25)]" />
           <div
             role="slider"
             tabIndex={0}
@@ -78,16 +54,15 @@ export function CompareOverlay({ view, split, onSplit }: { view: CompareView; sp
             }}
             onPointerMove={(event) => event.currentTarget.hasPointerCapture(event.pointerId) && move(event)}
             onKeyDown={handleKey}
-            // 72 px = alça de 64 px + 4 px de cada lado para o anel de foco; nas bordas a caixa para dentro do recorte.
+            // 72 px = alça de 44 px com folga para o toque e o anel de foco; nas bordas a caixa para dentro do recorte.
             style={{ left: `clamp(36px, ${split * 100}%, calc(100% - 36px))` }}
             className="group absolute inset-y-0 w-[72px] -translate-x-1/2 cursor-ew-resize touch-none outline-none"
           >
             <span
               aria-hidden="true"
-              className="absolute left-1/2 top-1/2 flex h-10 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2.5 rounded-full bg-accent text-accent-ink shadow-[0_4px_16px_rgb(0_0_0/.4)] group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-white"
+              className="absolute left-1/2 top-1/2 flex size-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-foreground text-accent-ink shadow-[0_4px_16px_rgb(0_0_0/.4)] group-focus-visible:outline-2 group-focus-visible:outline-offset-2 group-focus-visible:outline-white"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 6-6 6 6 6" /></svg>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 6 6 6-6 6" /></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6" /></svg>
             </span>
           </div>
         </>
