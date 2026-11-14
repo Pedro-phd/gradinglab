@@ -9,8 +9,8 @@ import type { CubeLut } from "./cube-lut";
 const THUMB_WIDTH = 480;
 
 export type ThumbnailInput = {
-  /** Vídeo pausado no quadro das miniaturas; null enquanto toca. */
-  video: HTMLVideoElement | null;
+  /** Vídeo pausado no quadro das miniaturas (null enquanto toca) ou a prévia reduzida da foto. */
+  video: HTMLVideoElement | HTMLCanvasElement | null;
   /** Muda a cada novo quadro pausado (pausa, busca, troca de vídeo). */
   frameVersion: number;
   base: LutLayer[]; // a pilha atual
@@ -26,16 +26,18 @@ export type ThumbnailInput = {
  */
 export function useLookThumbnails({ video, frameVersion, base, normalization, candidates, enabled }: ThumbnailInput) {
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
-  const rendererRef = useRef<{ video: HTMLVideoElement; renderer: LutRenderer; canvas: HTMLCanvasElement } | null>(null);
+  const rendererRef = useRef<{ video: HTMLVideoElement | HTMLCanvasElement; renderer: LutRenderer; canvas: HTMLCanvasElement } | null>(null);
 
   useEffect(() => () => rendererRef.current?.renderer.dispose(), []);
 
   useEffect(() => {
-    if (!enabled || !video || video.readyState < 2 || video.videoWidth === 0) return;
+    const isVideo = video instanceof HTMLVideoElement;
+    if (!enabled || !video || (isVideo && (video.readyState < 2 || video.videoWidth === 0))) return;
+    const [width, height] = isVideo ? [video.videoWidth, video.videoHeight] : [video.width, video.height];
     if (rendererRef.current?.video !== video) {
       rendererRef.current?.renderer.dispose();
       const canvas = document.createElement("canvas");
-      const renderer = createLutRenderer(canvas, video, () => undefined);
+      const renderer = isVideo ? createLutRenderer(canvas, video, () => undefined) : createLutRenderer(canvas, null, () => undefined, { still: true });
       rendererRef.current = renderer ? { video, renderer, canvas } : null;
     }
     const current = rendererRef.current;
@@ -43,7 +45,7 @@ export function useLookThumbnails({ video, frameVersion, base, normalization, ca
     const { renderer, canvas } = current;
     const small = document.createElement("canvas");
     small.width = THUMB_WIDTH;
-    small.height = Math.round((THUMB_WIDTH * video.videoHeight) / video.videoWidth);
+    small.height = Math.round((THUMB_WIDTH * height) / width);
     const context = small.getContext("2d");
     if (!context) return;
     context.imageSmoothingQuality = "high"; // o padrão ("low") serrilha ao reduzir de 1080p/4K
@@ -58,7 +60,8 @@ export function useLookThumbnails({ video, frameVersion, base, normalization, ca
       renderer.setLayers([...kept, { lut: candidate.lut, intensity: 1 }]);
       renderer.setNormalization(normalization);
       renderer.setCompare(0, false);
-      renderer.draw();
+      if (isVideo) renderer.draw();
+      else renderer.drawFrame(video);
       // Lido na mesma tarefa do desenho: o buffer do WebGL ainda vale sem preserveDrawingBuffer.
       context.drawImage(canvas, 0, 0, small.width, small.height);
       const url = small.toDataURL("image/jpeg", 0.9);

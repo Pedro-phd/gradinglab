@@ -12,6 +12,9 @@ import { ExportControl } from "./export-screen";
 import { ConvertingScreen, HomeScreen } from "./home-screen";
 import { LookStrip, ToolBar, type Tool } from "./look-strip";
 import { LutPreview, type Snapshot } from "./lut-preview";
+import { isPhotoFile, openPhoto, type Photo } from "./photo";
+import { PhotoExportControl } from "./photo-export";
+import { PhotoPreview } from "./photo-preview";
 import { initialLutState, lutLayers, lutReducer, stackLabel } from "./lut-state";
 import { CompareSheet, OriginSheet, profileLabel } from "./source-profile";
 import { StackSheet } from "./stack-sheet";
@@ -28,7 +31,8 @@ type State =
   // converting: o navegador não decodifica o original; uma cópia H.264 está sendo gerada neste aparelho.
   | { kind: "converting"; name: string; progress: number }
   // converted: o arquivo em uso é a cópia H.264 (8 bits); a exportação sai dela.
-  | { kind: "video"; name: string; file: File; url: string; autoPlay: boolean; metadata: Metadata | null; converted: boolean };
+  | { kind: "video"; name: string; file: File; url: string; autoPlay: boolean; metadata: Metadata | null; converted: boolean }
+  | { kind: "photo"; name: string; photo: Photo; url: string }; // url: só identifica a foto aberta (remonta a exportação)
 
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
 
@@ -75,7 +79,8 @@ export function VideoPicker() {
   }, [needsAppleLut]);
   const normalization = useMemo(() => ({ normalizedBase: plan.normalizedBase, lookInput: plan.normalize, lut: appleLut, softHighlights }), [plan.normalizedBase, plan.normalize, appleLut, softHighlights]);
   const candidates = useMemo(() => library.folders.flatMap((folder) => folder.items.flatMap((item) => (item.lut ? [{ id: item.id, lut: item.lut }] : []))), [library.folders]);
-  const thumbs = useLookThumbnails({ video: pausedFrame.video, frameVersion: pausedFrame.version, base: layers, normalization, candidates, enabled: !unsupported && plan.applyLook });
+  const thumbSource = state.kind === "photo" ? state.photo.preview : pausedFrame.video;
+  const thumbs = useLookThumbnails({ video: thumbSource, frameVersion: pausedFrame.version, base: layers, normalization, candidates, enabled: !unsupported && plan.applyLook });
   const thumbStatus = unsupported ? "Indisponível sem WebGL2." : !plan.applyLook ? "Confirme a origem do vídeo para gerar as miniaturas." : null;
 
   // Galeria: tocar adiciona; tocar de novo numa que já está na pilha tira a última com esse nome.
@@ -150,6 +155,17 @@ export function VideoPicker() {
     const file = event.target.files?.[0];
     event.target.value = ""; // permite escolher o mesmo arquivo de novo
     if (!file) return;
+    if (isPhotoFile(file)) {
+      conversion.current?.abort();
+      void openPhoto(file).then((photo) => {
+        if (!photo) return showError("Este navegador não abre esta foto. Tente JPEG, PNG ou HEIC (no Safari).");
+        setUnsupported(false);
+        setChoice(chooseProfile("normal")); // foto não sai em Apple Log
+        setHdr(false);
+        setState({ kind: "photo", name: file.name, photo, url: `${file.name}-${Date.now()}` });
+      });
+      return;
+    }
     const result = validateVideoFile(file);
     if (!result.ok) {
       showError(result.error.message);
@@ -181,7 +197,7 @@ export function VideoPicker() {
   }
 
   const webCodecs = typeof VideoEncoder !== "undefined" && typeof VideoDecoder !== "undefined";
-  const blocked = unsupported ? "Indisponível sem WebGL2." : !webCodecs ? "Este navegador não tem WebCodecs para exportar." : lutState.stack.length === 0 && !hasEffects(effects) ? "Adicione uma LUT ou um ajuste para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null;
+  const blocked = unsupported ? "Indisponível sem WebGL2." : !webCodecs && state.kind === "video" ? "Este navegador não tem WebCodecs para exportar." : lutState.stack.length === 0 && !hasEffects(effects) ? "Adicione uma LUT ou um ajuste para exportar." : plan.requiresConfirmation ? "Confirme a origem do vídeo para exportar." : null;
   const enabled = !unsupported && plan.intensityAvailable;
   const disabledReason = unsupported ? "Indisponível sem WebGL2." : !plan.intensityAvailable ? "Confirme a origem do vídeo para ajustar as intensidades." : null;
   const closeTool = () => setTool(strip);
@@ -207,9 +223,9 @@ export function VideoPicker() {
   return (
     <main className="group flex flex-1 flex-col">
       {/* Fica fora do fluxo visual, mas focável; os rótulos de cada tela abrem o seletor. */}
-      <input id="video-input" type="file" accept="video/*,.mov,.qt,video/quicktime" onChange={handleChange} className="sr-only" />
+      <input id="video-input" type="file" accept="video/*,.mov,.qt,video/quicktime,image/*,.heic,.heif" onChange={handleChange} className="sr-only" />
 
-      {state.kind === "video" ? (
+      {state.kind === "video" || state.kind === "photo" ? (
         // Tela cheia, como um editor nativo: vídeo em cima, looks e ferramentas embaixo (à direita no computador).
         <div className="fixed inset-0 flex flex-col overscroll-none bg-black md:grid md:grid-cols-[minmax(0,1fr)_400px] md:grid-rows-[auto_minmax(0,1fr)]">
           <header className="flex shrink-0 items-center justify-between gap-2 px-3 pt-[max(env(safe-area-inset-top),12px)] md:col-span-2 md:pb-1">
@@ -221,18 +237,22 @@ export function VideoPicker() {
               {profileLabel(choice.profile)}
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
             </button>
-            <ExportControl
+            {state.kind === "photo" ? (
+              <PhotoExportControl key={state.url} photo={state.photo} name={state.name} lutName={active?.name ?? null} color={{ profile: choice.profile, lutExpectsLog, layers, normalizationLut: appleLut, softHighlights, effects: appliedEffects }} blocked={blocked} snapshot={() => snapshot.current?.() ?? null} />
+            ) : <ExportControl
               key={state.url}
               file={state.file}
               lutName={active?.name ?? null}
               color={{ profile: choice.profile, lutExpectsLog, layers, normalizationLut: appleLut, softHighlights, effects: appliedEffects }}
               blocked={blocked}
               snapshot={() => snapshot.current?.() ?? null}
-            />
+            />}
           </header>
 
-          <section aria-label="Prévia do vídeo" className="flex min-h-0 flex-1 flex-col px-3 pt-3 md:pb-3">
-            <LutPreview
+          <section aria-label="Prévia" className="flex min-h-0 flex-1 flex-col px-3 pt-3 md:pb-3">
+            {state.kind === "photo" ? (
+              <PhotoPreview preview={state.photo.preview} layers={layers} lutName={label} intensityPercent={singlePercent} awaitingProfile={!plan.applyLook} normalizedBase={plan.normalizedBase} normalizedLookInput={plan.normalize} normalizationLut={appleLut} softHighlights={softHighlights} effects={appliedEffects} unsupported={unsupported} mode={mode} snapshotRef={snapshot} onUnsupported={markUnsupported} />
+            ) : <LutPreview
               key={state.url}
               src={state.url}
               autoPlay={state.autoPlay}
@@ -253,7 +273,7 @@ export function VideoPicker() {
               onUnsupported={markUnsupported}
               onLoadedMetadata={handleMetadata}
               onVideoError={handleVideoError}
-            />
+            />}
           </section>
 
           <div className="flex shrink-0 flex-col md:justify-end md:border-l md:border-white/10">
@@ -287,7 +307,7 @@ export function VideoPicker() {
             onSoftHighlights={setSoftHighlights}
             video={{
               name: state.name,
-              details: state.metadata
+              details: state.kind === "photo" ? `Foto · ${describeDimensions(state.photo.width, state.photo.height)}` : state.metadata
                 ? `${formatDuration(state.metadata.duration)} · ${describeDimensions(state.metadata.width, state.metadata.height)}${state.converted ? " · convertido neste aparelho (8 bits)" : ""}`
                 : "Lendo informações do vídeo…",
             }}

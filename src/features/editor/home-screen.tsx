@@ -1,8 +1,8 @@
-// Tela inicial (escolher vídeo) e a de conversão local, no mesmo molde de tela cheia.
+// Tela inicial (escolher vídeo ou foto) e a de conversão local, no mesmo molde de tela cheia.
 import type { ReactNode } from "react";
 
 const focus = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white";
-const STEPS = ["Escolha o vídeo", "Empilhe looks e ajuste a força", "Exporte em MP4 com áudio"];
+const STEPS = ["Escolha o vídeo ou a foto", "Empilhe looks e ajuste a força", "Exporte em MP4 (com áudio) ou JPEG"];
 
 function Shell({ children }: { children: ReactNode }) {
   return (
@@ -26,7 +26,7 @@ export function HomeScreen({ inputId, error }: { inputId: string; error: { messa
   return (
     <Shell>
       <Title>
-        <h1 className="font-display text-[34px] font-bold leading-10">Dê cor ao seu vídeo</h1>
+        <h1 className="font-display text-[34px] font-bold leading-10">Dê cor ao seu vídeo ou foto</h1>
         <p className="text-[15px] leading-[21px] text-muted">Tudo roda neste aparelho. Nada é enviado.</p>
       </Title>
 
@@ -39,8 +39,8 @@ export function HomeScreen({ inputId, error }: { inputId: string; error: { messa
         <span className="flex size-16 items-center justify-center rounded-full bg-accent text-accent-ink">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </span>
-        <span className="text-[17px] font-semibold">{error ? "Tentar outro vídeo" : "Escolher vídeo"}</span>
-        <span className="text-[13px] text-muted">Fotos ou Arquivos · MOV, MP4 · Apple Log</span>
+        <span className="text-[17px] font-semibold">{error ? "Tentar outro arquivo" : "Escolher vídeo ou foto"}</span>
+        <span className="text-[13px] text-muted">Fotos ou Arquivos · MOV, MP4, JPEG, HEIC</span>
       </label>
 
       <ol className="overflow-hidden rounded-2xl bg-surface">

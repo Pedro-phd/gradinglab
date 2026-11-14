@@ -133,10 +133,10 @@ export async function checkSupport(env: ExportEnv, plan: ExportPlan): Promise<Ex
   return null;
 }
 
-// Nome do original + nome da LUT; sem LUT, "com-look". Sempre .mp4: o arquivo baixado nunca substitui o original.
-export function exportFileName(videoName: string, lutName: string | null): string {
+// Nome do original + nome da LUT; sem LUT, "com-look". Extensão própria (.mp4/.jpg): o arquivo baixado nunca substitui o original.
+export function exportFileName(videoName: string, lutName: string | null, extension = "mp4"): string {
   const base = (name: string) => name.replace(/\.[^.]*$/, "").replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "_");
-  return `${base(videoName)}-${lutName ? base(lutName) : "com-look"}.mp4`;
+  return `${base(videoName)}-${lutName ? base(lutName) : "com-look"}.${extension}`;
 }
 
 /** null quando a promessa não responde a tempo: o armazenamento local de alguns navegadores trava sem erro. */
