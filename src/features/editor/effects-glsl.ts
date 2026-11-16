@@ -62,6 +62,8 @@ uniform float uExposure; // EV
 uniform vec3 uWhiteBalance;
 uniform float uContrast;
 uniform float uSaturation;
+uniform vec4 uTone; // ponto preto, sombras, realces, luminosidade (-1..1), com o Brilho já somado
+uniform float uVibrance;
 uniform float uVignette;
 uniform float uVignetteSoftness;
 uniform float uAspect; // largura/altura do quadro
@@ -81,12 +83,29 @@ float vignetteAt(vec2 uv) {
   return 1.0 - uVignette * smoothstep((1.0 - uVignetteSoftness) * 0.9, 1.05, r);
 }
 
+// Curva de tons sobre a luminância em gama ~2,2 (perto de como a gente percebe), não na luz linear.
+float toneCurve(float p) {
+  float k = 0.1 * uTone.x;
+  p = max((p - k) / (1.0 - k), 0.0); // positivo afunda os pretos; negativo os levanta
+  p += uTone.y * 0.9 * p * (1.0 - smoothstep(0.0, 0.7, p));
+  p += uTone.z * 0.3 * smoothstep(0.4, 1.0, p) * min(p, 2.0); // acima de 1 (Log) também desce
+  return pow(max(p, 0.0), exp2(-0.6 * uTone.w)); // luminosidade: gama nos meios-tons, preto e branco fixos
+}
+
 // luma: coeficientes das primárias em que a luz está (Rec.709, ou Rec.2020 no Log que vai direto à LUT).
 vec3 adjustLinear(vec3 lin, vec3 luma, vec2 uv) {
   if (uAdjust) {
     lin *= exp2(uExposure) * uWhiteBalance;
+    // Tons pela luminância: a razão mantém o matiz de cada pixel.
+    float y = dot(lin, luma);
+    float toned = pow(toneCurve(pow(max(y, 0.0), 1.0 / 2.2)), 2.2);
+    lin = y > 1e-5 ? lin * (toned / y) : vec3(toned);
     lin = 0.18 * pow(max(lin, vec3(1e-6)) / 0.18, vec3(uContrast)); // contraste em torno do cinza médio
-    lin = max(mix(vec3(dot(lin, luma)), lin, uSaturation), 0.0);
+    // Vividez: positiva satura mais o que tem pouca cor (protege o que já é forte); negativa tira por igual.
+    float hi = max(lin.r, max(lin.g, lin.b));
+    float chroma = hi > 1e-5 ? (hi - min(lin.r, min(lin.g, lin.b))) / hi : 0.0;
+    float vibrance = 1.0 + uVibrance * (uVibrance > 0.0 ? 1.0 - chroma : 1.0);
+    lin = max(mix(vec3(dot(lin, luma)), lin, uSaturation * vibrance), 0.0);
   }
   if (uVignette > 0.0) lin *= vignetteAt(uv);
   return lin;
@@ -133,6 +152,10 @@ export const FILM_GLSL = `
 uniform sampler2D uHalationTex;
 uniform sampler2D uBloomTex;
 uniform sampler2D uMistTex;
+uniform sampler2D uDefinitionTex; // luminância borrada, para o contraste local
+uniform float uDefinition; // 0 desliga
+uniform float uSharpness; // 0 desliga
+uniform vec2 uTexel; // distância entre as amostras da nitidez, em coordenadas do quadro
 uniform float uHalation; // 0 desliga
 uniform float uBloom;
 uniform float uMist;
@@ -146,10 +169,24 @@ vec3 unpackGlow(vec3 v) { return uGlowPacked ? v / (1.0 - min(v, vec3(0.999))) :
 // lin: luz linear já ajustada. Bloom e halation somam luz; a difusão (filtro Pro-Mist) tira um pouco do
 // contraste e espalha as luzes, o que também levanta levemente os pretos.
 vec3 applyGlow(vec3 lin, vec2 uv) {
+  // Definição: afasta cada pixel da média da vizinhança (em razão, para não mudar a cor). Limitada para não fazer halo forte.
+  if (uDefinition > 0.0) {
+    float y = dot(lin, LUMA_709);
+    float around = dot(unpackGlow(texture(uDefinitionTex, uv).rgb), LUMA_709) * 1.05; // a extração divide por 1,05 com limiar 0
+    lin *= clamp(pow((y + 0.02) / (around + 0.02), 0.8 * uDefinition), 0.6, 1.6);
+  }
   if (uMist > 0.0) lin = lin * (1.0 - 0.25 * uMist) + 0.9 * uMist * unpackGlow(texture(uMistTex, uv).rgb);
   if (uBloom > 0.0) lin += uBloom * unpackGlow(texture(uBloomTex, uv).rgb);
   if (uHalation > 0.0) lin += uHalation * vec3(1.0, 0.28, 0.06) * unpackGlow(texture(uHalationTex, uv).rgb);
   return lin;
+}
+
+// Nitidez (máscara de nitidez): diferença entre o pixel e a média dos 4 vizinhos no quadro original, só na luminância.
+float sharpenDetail(vec2 uv) {
+  vec3 around = texture(uFrame, uv + vec2(uTexel.x, 0.0)).rgb + texture(uFrame, uv - vec2(uTexel.x, 0.0)).rgb
+    + texture(uFrame, uv + vec2(0.0, uTexel.y)).rgb + texture(uFrame, uv - vec2(0.0, uTexel.y)).rgb;
+  float detail = dot(texture(uFrame, uv).rgb - 0.25 * around, LUMA_709);
+  return clamp(detail, -0.06, 0.06) * uSharpness * 2.5; // limite: borda forte não vira contorno branco
 }
 
 float grainHash(vec2 q) { q = fract(q * vec2(443.897, 441.423)); q += dot(q, q.yx + 19.19); return fract((q.x + q.y) * q.x); }

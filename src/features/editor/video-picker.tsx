@@ -11,6 +11,8 @@ import { hasEffects, NEUTRAL_EFFECTS, setEffect } from "./effects";
 import { ExportControl } from "./export-screen";
 import { ConvertingScreen, HomeScreen } from "./home-screen";
 import { LookStrip, ToolBar, type Tool } from "./look-strip";
+import { PresetStrip } from "./preset-strip";
+import { fromIphone } from "./presets";
 import { LutPreview, type Snapshot } from "./lut-preview";
 import { isPhotoFile, openPhoto, type Photo } from "./photo";
 import { PhotoExportControl } from "./photo-export";
@@ -53,10 +55,10 @@ export function VideoPicker() {
   const singlePercent = lutState.stack.length === 1 ? lutState.stack[0]!.intensity : null;
 
   const library = useLutLibrary();
-  // Ferramenta aberta: "looks" e "ajustes" são faixas fixas; as outras abrem um painel por cima e, ao fechar,
+  // Ferramenta aberta: "looks", "presets" e "ajustes" são faixas fixas; as outras abrem um painel por cima e, ao fechar,
   // voltam à última faixa. A galeria abre a partir da pilha.
   const [tool, setTool] = useState<Tool>("looks");
-  const [strip, setStrip] = useState<"looks" | "ajustes">("looks");
+  const [strip, setStrip] = useState<"looks" | "ajustes" | "presets">("looks");
   const [effects, setEffects] = useState(NEUTRAL_EFFECTS);
   const [softHighlights, setSoftHighlights] = useState(false); // só vale com Apple Log (a conversão é dele)
   // Como o look, os ajustes esperam a origem confirmada: dependem da base certa.
@@ -203,7 +205,7 @@ export function VideoPicker() {
   const closeTool = () => setTool(strip);
   function selectTool(next: Tool) {
     setTool(next);
-    if (next === "looks" || next === "ajustes") setStrip(next);
+    if (next === "looks" || next === "ajustes" || next === "presets") setStrip(next);
   }
 
   function closeVideo() {
@@ -277,7 +279,9 @@ export function VideoPicker() {
           </section>
 
           <div className="flex shrink-0 flex-col md:justify-end md:border-l md:border-white/10">
-            {strip === "ajustes" ? (
+            {strip === "presets" ? (
+              <PresetStrip effects={effects} enabled={enabled} notice={notice} onPick={(preset) => setEffects(fromIphone(preset.recipe))} />
+            ) : strip === "ajustes" ? (
               <AdjustStrip effects={effects} enabled={enabled} notice={notice} onChange={(key, value) => setEffects((current) => setEffect(current, key, value))} onReset={() => setEffects(NEUTRAL_EFFECTS)} />
             ) : (
               <LookStrip

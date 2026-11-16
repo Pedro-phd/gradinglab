@@ -1,4 +1,4 @@
-// Halation e bloom: extrai as luzes acima do limiar e borra em 1/4 da resolução, antes do passe principal.
+// Halation, bloom, difusão e definição: extrai as luzes acima do limiar e borra em 1/4 da resolução, antes do passe principal.
 // Usado pela prévia e pela exportação (mesmo renderizador); sem leitura de pixels.
 import type { Glow } from "./effects";
 import { BLUR_FRAGMENT, PASS_VERTEX } from "./effects-glsl";
@@ -9,8 +9,8 @@ type Target = { texture: WebGLTexture; framebuffer: WebGLFramebuffer };
 export type GlowPass = {
   /** Sem alvo em ponto flutuante a luz vai comprimida em 8 bits; o passe principal precisa saber. */
   packed: boolean;
-  /** pair 0 = halation, 1 = bloom, 2 = difusão. setShared aplica no programa de extração os uniforms do quadro e dos ajustes. */
-  run(glow: Glow, pair: 0 | 1 | 2, lumaOnly: boolean, width: number, height: number, setShared: (locate: Locate) => void): WebGLTexture;
+  /** pair 0 = halation, 1 = bloom, 2 = difusão, 3 = definição. setShared aplica no programa de extração os uniforms do quadro e dos ajustes. */
+  run(glow: Glow, pair: 0 | 1 | 2 | 3, lumaOnly: boolean, width: number, height: number, setShared: (locate: Locate) => void): WebGLTexture;
   dispose(): void;
 };
 
@@ -45,12 +45,12 @@ export function createGlowPass(
     targets = [];
   }
 
-  // Três pares (ida e volta do desfoque): halation, bloom e difusão.
+  // Quatro pares (ida e volta do desfoque): halation, bloom, difusão e definição.
   function ensureTargets(width: number, height: number) {
     if (size.width === width && size.height === height) return;
     release();
     size = { width, height };
-    targets = [0, 1, 2, 3, 4, 5].map(() => {
+    targets = [0, 1, 2, 3, 4, 5, 6, 7].map(() => {
       const texture = gl.createTexture()!;
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, texture);

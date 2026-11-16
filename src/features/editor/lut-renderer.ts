@@ -62,7 +62,8 @@ export function createLutRenderer(
   const NORM_UNIT = MAX_STACKED_LUTS + 1; // depois do quadro (0) e das camadas (1..MAX)
   const HALATION_UNIT = NORM_UNIT + 1;
   const BLOOM_UNIT = NORM_UNIT + 2;
-  const MIST_UNIT = NORM_UNIT + 3; // 12: dentro das 16 unidades que o WebGL2 garante
+  const MIST_UNIT = NORM_UNIT + 3;
+  const DEFINITION_UNIT = NORM_UNIT + 4; // 13: dentro das 16 unidades que o WebGL2 garante
   let lost = context.isContextLost(); // canvas reaproveitado depois de um dispose
   const lose = loseContext.get(canvas) ?? gl.getExtension("WEBGL_lose_context");
   loseContext.set(canvas, lose);
@@ -155,12 +156,14 @@ export function createLutRenderer(
     gl.uniform1i(locate("uSoftHighlights"), normalization.softHighlights ? 1 : 0);
     gl.uniform1i(locate("uNormalizedBase"), normalization.normalizedBase ? 1 : 0);
     gl.uniform1i(locate("uNormalizedLookInput"), normalization.lookInput ? 1 : 0);
-    gl.uniform1i(locate("uPreActive"), effects.adjust || effects.vignette > 0 || effects.halation || effects.bloom || effects.mist ? 1 : 0);
+    gl.uniform1i(locate("uPreActive"), effects.adjust || effects.vignette > 0 || effects.halation || effects.bloom || effects.mist || effects.definition ? 1 : 0);
     gl.uniform1i(locate("uAdjust"), effects.adjust ? 1 : 0);
     gl.uniform1f(locate("uExposure"), effects.exposure);
     gl.uniform3fv(locate("uWhiteBalance"), effects.whiteBalance);
     gl.uniform1f(locate("uContrast"), effects.contrast);
     gl.uniform1f(locate("uSaturation"), effects.saturation);
+    gl.uniform4fv(locate("uTone"), effects.tone);
+    gl.uniform1f(locate("uVibrance"), effects.vibrance);
     gl.uniform1f(locate("uVignette"), effects.vignette);
     gl.uniform1f(locate("uVignetteSoftness"), effects.vignetteSoftness);
     gl.uniform1f(locate("uAspect"), width / height);
@@ -175,7 +178,7 @@ export function createLutRenderer(
     frameCount += 1;
     // Vinheta, grão e brilho seguem a imagem inteira; num pedaço, ela é maior que o canvas.
     const [totalWidth, totalHeight] = tile ? [tile.region.totalWidth, tile.region.totalHeight] : [width, height];
-    const glowing = effects.halation || effects.bloom || effects.mist;
+    const glowing = effects.halation || effects.bloom || effects.mist || effects.definition;
     // Pedaço: o brilho é calculado na imagem inteira reduzida (o desfoque passa das bordas do pedaço).
     const [glowWidth, glowHeight] = tile ? sizeOf(tile.glow) : [width, height];
     upload(tile && glowing ? tile.glow : source);
@@ -185,6 +188,7 @@ export function createLutRenderer(
     const halation = effects.halation && pass.run(effects.halation, 0, true, glowWidth, glowHeight, shared);
     const bloom = effects.bloom && pass.run(effects.bloom, 1, false, glowWidth, glowHeight, shared);
     const mist = effects.mist && pass.run(effects.mist, 2, false, glowWidth, glowHeight, shared);
+    const definition = effects.definition && pass.run(effects.definition, 3, true, glowWidth, glowHeight, shared);
     if (tile && glowing) upload(source);
 
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -198,6 +202,14 @@ export function createLutRenderer(
     gl.bindTexture(gl.TEXTURE_2D, bloom || null);
     gl.activeTexture(gl.TEXTURE0 + MIST_UNIT);
     gl.bindTexture(gl.TEXTURE_2D, mist || null);
+    gl.activeTexture(gl.TEXTURE0 + DEFINITION_UNIT);
+    gl.bindTexture(gl.TEXTURE_2D, definition || null);
+    gl.uniform1i(at("uDefinitionTex"), DEFINITION_UNIT);
+    gl.uniform1f(at("uDefinition"), effects.definition?.amount ?? 0);
+    // Nitidez: vizinhos a 1 pixel até 1440p; acima disso a distância cresce, para o efeito não sumir em 4K.
+    const sharpenStep = Math.max(1, Math.min(totalWidth, totalHeight) / 1440);
+    gl.uniform1f(at("uSharpness"), effects.sharpness);
+    gl.uniform2f(at("uTexel"), sharpenStep / width, sharpenStep / height);
     gl.uniform1i(at("uMistTex"), MIST_UNIT);
     gl.uniform1f(at("uMist"), effects.mist?.amount ?? 0);
     gl.uniform1i(at("uHalationTex"), HALATION_UNIT);

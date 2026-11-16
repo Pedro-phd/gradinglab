@@ -8,6 +8,15 @@ export type Effects = {
   tint: number; // -100 (verde) .. 100 (magenta)
   contrast: number; // -50..50
   saturation: number; // %, 0..200
+  // Mesmos nomes e faixas do "Ajustar" do app Fotos do iPhone, para as receitas valerem direto.
+  brilliance: number; // -100..100: sobe as sombras e segura as luzes (ou o contrário)
+  highlights: number; // -100..100
+  shadows: number; // -100..100
+  brightness: number; // -100..100: meios-tons
+  blackPoint: number; // -100..100: positivo afunda os pretos
+  vibrance: number; // -100..100: satura mais o que tem pouca cor
+  sharpness: number; // 0..100
+  definition: number; // 0..100: contraste local
   halation: number; // 0..100; 0 desliga
   halationThreshold: number; // % da luz a partir da qual brilha
   halationRadius: number;
@@ -31,6 +40,14 @@ export const NEUTRAL_EFFECTS: Effects = {
   tint: 0,
   contrast: 0,
   saturation: 100,
+  brilliance: 0,
+  highlights: 0,
+  shadows: 0,
+  brightness: 0,
+  blackPoint: 0,
+  vibrance: 0,
+  sharpness: 0,
+  definition: 0,
   halation: 0,
   halationThreshold: 75,
   halationRadius: 35,
@@ -58,10 +75,18 @@ const control = (key: EffectKey, label: string, min: number, max: number, format
 
 export const ADJUSTMENTS: Adjustment[] = [
   { id: "exposure", label: "Exposição", main: control("exposure", "Exposição (EV)", -200, 200, (value) => `${value > 0 ? "+" : ""}${decimal(value / 100, 2)}`), extra: [] },
+  { id: "brilliance", label: "Brilho", main: control("brilliance", "Brilho", -100, 100, signed), extra: [] },
+  { id: "highlights", label: "Realces", main: control("highlights", "Realces", -100, 100, signed), extra: [] },
+  { id: "shadows", label: "Sombras", main: control("shadows", "Sombras", -100, 100, signed), extra: [] },
+  { id: "contrast", label: "Contraste", main: control("contrast", "Contraste", -50, 50, signed), extra: [] },
+  { id: "brightness", label: "Luminosidade", main: control("brightness", "Luminosidade", -100, 100, signed), extra: [] },
+  { id: "blackPoint", label: "Ponto preto", main: control("blackPoint", "Ponto preto", -100, 100, signed), extra: [] },
+  { id: "saturation", label: "Saturação", main: control("saturation", "Saturação", 0, 200, percent), extra: [] },
+  { id: "vibrance", label: "Vividez", main: control("vibrance", "Vividez", -100, 100, signed), extra: [] },
   { id: "temperature", label: "Temperatura", main: control("temperature", "Temperatura", -100, 100, signed), extra: [] },
   { id: "tint", label: "Tom", main: control("tint", "Tom", -100, 100, signed), extra: [] },
-  { id: "contrast", label: "Contraste", main: control("contrast", "Contraste", -50, 50, signed), extra: [] },
-  { id: "saturation", label: "Saturação", main: control("saturation", "Saturação", 0, 200, percent), extra: [] },
+  { id: "sharpness", label: "Nitidez", main: control("sharpness", "Nitidez", 0, 100, plain), extra: [] },
+  { id: "definition", label: "Definição", main: control("definition", "Definição", 0, 100, plain), extra: [] },
   { id: "halation", label: "Halation", main: control("halation", "Halation", 0, 100), extra: [control("halationThreshold", "A partir de", 30, 100, percent), control("halationRadius", "Raio", 5, 100)] },
   { id: "bloom", label: "Bloom", main: control("bloom", "Bloom", 0, 100), extra: [control("bloomThreshold", "A partir de", 20, 100, percent), control("bloomRadius", "Raio", 5, 100)] },
   { id: "mist", label: "Difusão", main: control("mist", "Difusão", 0, 100), extra: [control("mistThreshold", "A partir de", 0, 90, percent), control("mistRadius", "Raio", 5, 100)] },
@@ -100,9 +125,19 @@ export function whiteBalanceGains(temperature: number, tint: number): Rgb {
 
 export type Glow = { amount: number; threshold: number; radius: number };
 
+// Ajustes de cor feitos pixel a pixel em adjustLinear; nitidez, definição e os efeitos de filme vão por fora.
+const COLOR_KEYS: EffectKey[] = ["exposure", "temperature", "tint", "contrast", "saturation", "brilliance", "highlights", "shadows", "brightness", "blackPoint", "vibrance"];
+const clampUnit = (value: number) => Math.min(1, Math.max(-1, value));
+
+/** Ponto preto, sombras, realces e luminosidade em -1..1. O Brilho não tem curva própria: sobe as sombras, segura as luzes e clareia um pouco. */
+export function toneUniform(effects: Effects): [number, number, number, number] {
+  const brilliance = effects.brilliance / 100;
+  return [effects.blackPoint / 100, clampUnit(effects.shadows / 100 + 0.5 * brilliance), clampUnit(effects.highlights / 100 - 0.5 * brilliance), clampUnit(effects.brightness / 100 + 0.2 * brilliance)];
+}
+
 /** O que o shader recebe. Raio do brilho em texels de 1/4 da resolução de um quadro com 1080 no lado menor. */
 export function effectUniforms(effects: Effects) {
-  const adjust = ADJUSTMENTS.slice(0, 5).some((item) => isAdjusted(effects, item));
+  const adjust = COLOR_KEYS.some((key) => effects[key] !== NEUTRAL_EFFECTS[key]);
   const glow = (amount: number, threshold: number, radius: number, gain: number): Glow | null =>
     amount > 0 ? { amount: (amount / 100) * gain, threshold: threshold / 100, radius: radius / 25 } : null;
   return {
@@ -111,6 +146,11 @@ export function effectUniforms(effects: Effects) {
     whiteBalance: whiteBalanceGains(effects.temperature, effects.tint),
     contrast: 1 + effects.contrast / 100,
     saturation: effects.saturation / 100,
+    tone: toneUniform(effects),
+    vibrance: effects.vibrance / 100,
+    sharpness: effects.sharpness / 100,
+    // Definição: luminância borrada (limiar 0) para comparar cada pixel com a vizinhança.
+    definition: glow(effects.definition, 0, 30, 1),
     vignette: (effects.vignette / 100) * 0.85,
     vignetteSoftness: effects.vignetteSoftness / 100,
     halation: glow(effects.halation, effects.halationThreshold, effects.halationRadius, 1.5),

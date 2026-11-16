@@ -75,6 +75,11 @@ void main() {
       ? linearToAppleLog3(applyGlow(adjustLinear(appleLogToLinear3(raw), LUMA_2020, uv), uv))
       : graded;
   }
+  if (uSharpness > 0.0) {
+    float detail = sharpenDetail(vUv);
+    graded += detail;
+    lookInput += detail;
+  }
   // A 1ª camada mistura a base ajustada com a LUT aplicada a lookInput; as seguintes recebem o resultado anterior.
   vec3 look = graded;
 ${LAYER_STEPS}
