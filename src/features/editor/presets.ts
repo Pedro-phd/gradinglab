@@ -66,3 +66,6 @@ export function matchingPreset(effects: Effects): Preset | null {
     return (Object.keys(target) as (keyof Effects)[]).every((key) => target[key] === effects[key]);
   }) ?? null;
 }
+
+/** Candidatos das miniaturas: fixos, para o gerador não refazer tudo a cada renderização. */
+export const PRESET_CANDIDATES = PRESETS.map((preset) => ({ id: preset.id, effects: fromIphone(preset.recipe) }));

@@ -12,7 +12,7 @@ import { ExportControl } from "./export-screen";
 import { ConvertingScreen, HomeScreen } from "./home-screen";
 import { LookStrip, ToolBar, type Tool } from "./look-strip";
 import { PresetStrip } from "./preset-strip";
-import { fromIphone } from "./presets";
+import { fromIphone, PRESET_CANDIDATES } from "./presets";
 import { LutPreview, type Snapshot } from "./lut-preview";
 import { isPhotoFile, openPhoto, type Photo } from "./photo";
 import { PhotoExportControl } from "./photo-export";
@@ -83,6 +83,8 @@ export function VideoPicker() {
   const candidates = useMemo(() => library.folders.flatMap((folder) => folder.items.flatMap((item) => (item.lut ? [{ id: item.id, lut: item.lut }] : []))), [library.folders]);
   const thumbSource = state.kind === "photo" ? state.photo.preview : pausedFrame.video;
   const thumbs = useLookThumbnails({ video: thumbSource, frameVersion: pausedFrame.version, base: layers, normalization, candidates, enabled: !unsupported && plan.applyLook });
+  // Presets: só gera enquanto a faixa está aberta (outro canvas WebGL).
+  const presetThumbs = useLookThumbnails({ video: thumbSource, frameVersion: pausedFrame.version, base: layers, normalization, candidates: PRESET_CANDIDATES, enabled: !unsupported && plan.applyLook && strip === "presets" });
   const thumbStatus = unsupported ? "Indisponível sem WebGL2." : !plan.applyLook ? "Confirme a origem do vídeo para gerar as miniaturas." : null;
 
   // Galeria: tocar adiciona; tocar de novo numa que já está na pilha tira a última com esse nome.
@@ -280,7 +282,7 @@ export function VideoPicker() {
 
           <div className="flex shrink-0 flex-col md:justify-end md:border-l md:border-white/10">
             {strip === "presets" ? (
-              <PresetStrip effects={effects} enabled={enabled} notice={notice} onPick={(preset) => setEffects(fromIphone(preset.recipe))} />
+              <PresetStrip effects={effects} thumbs={presetThumbs} enabled={enabled} notice={notice} onPick={(preset) => setEffects(fromIphone(preset.recipe))} />
             ) : strip === "ajustes" ? (
               <AdjustStrip effects={effects} enabled={enabled} notice={notice} onChange={(key, value) => setEffects((current) => setEffect(current, key, value))} onReset={() => setEffects(NEUTRAL_EFFECTS)} />
             ) : (

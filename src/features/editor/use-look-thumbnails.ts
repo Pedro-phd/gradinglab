@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createLutRenderer, type LutRenderer, type Normalization } from "./lut-renderer";
 import { MAX_STACKED_LUTS, type LutLayer } from "./lut-state";
 import type { CubeLut } from "./cube-lut";
+import { NEUTRAL_EFFECTS, type Effects } from "./effects";
 
 // Cartão tem ~170 px CSS; 480 cobre telas de densidade 2x–3x sem serrilhado.
 const THUMB_WIDTH = 480;
@@ -15,12 +16,14 @@ export type ThumbnailInput = {
   frameVersion: number;
   base: LutLayer[]; // a pilha atual
   normalization: Normalization;
-  candidates: { id: string; lut: CubeLut }[];
+  /** Com lut: troca a LUT de cima (looks). Sem lut: a pilha inteira com os ajustes da candidata (presets). */
+  candidates: { id: string; lut?: CubeLut; effects?: Effects }[];
   enabled: boolean; // perfil confirmado e WebGL2 disponível
 };
 
 /**
  * Miniatura = quadro pausado → pilha atual sem a LUT de cima → LUT candidata a 100%, pelo MESMO renderizador da prévia.
+ * Preset: quadro pausado → ajustes do preset → pilha atual inteira, como fica ao tocar nele.
  * Um canvas WebGL fora da tela desenha em resolução cheia e um canvas 2D reduz para JPEG.
  * Uma miniatura por quadro de tela, para não travar a interface.
  */
@@ -57,7 +60,8 @@ export function useLookThumbnails({ video, frameVersion, base, normalization, ca
     const step = () => {
       const candidate = candidates[index];
       if (!candidate) return;
-      renderer.setLayers([...kept, { lut: candidate.lut, intensity: 1 }]);
+      renderer.setLayers(candidate.lut ? [...kept, { lut: candidate.lut, intensity: 1 }] : base);
+      renderer.setEffects(candidate.effects ?? NEUTRAL_EFFECTS);
       renderer.setNormalization(normalization);
       renderer.setCompare(0, false);
       if (isVideo) renderer.draw();
